@@ -1,0 +1,30 @@
+# Object files
+*.o
+
+# Libraries
+*.lib
+*.a
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Autoconf
+*.Po
+*.m4
+*.in
+*.log
+*.status
+configure
+Makefile
+autom4te.cache
+
+# Ctags and Cscope
+tags

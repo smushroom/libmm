@@ -1,0 +1,23 @@
+/* 
+
+alloc:
+    user space memory alloc : buddy and slab algorithm which base on struct page 
+
+    buddy is a big granularity memory alloc method. we can apply for multiple PAGE_SIZE length memory.
+    slab is a small granularity memory alloc method.  we can apply for 2^n length memory. 
+    mempool is a memory pool.
+
+flags:
+    UNMOVEABLE, RECLAIMABLE, MOVABLE, RESERVE
+    set each page flags for migrate ,reclaim and reserve page.
+
+share:
+    multiple process share same pages.
+
+reclaim algorithm:
+    recliam page from lru 
+    
+swap:
+    swap_file
+    swapper_cache
+*/
