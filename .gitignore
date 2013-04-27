@@ -22,8 +22,8 @@
 *.in
 *.log
 *.status
-configure
 Makefile
+configure
 autom4te.cache
 
 # Ctags and Cscope
