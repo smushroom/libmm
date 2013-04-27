@@ -24,7 +24,6 @@
 #include <string.h>
 /*#include <assert.h>*/
 #include "const.h"
-#include "slab.h"
 #include "bitops.h"
 #include "radix-tree.h"
 
@@ -60,26 +59,26 @@ static unsigned long height_to_maxindex[RADIX_TREE_MAX_PATH];
 /*
  * Radix tree node cache.
  */
-static kmem_cache_t *radix_tree_node_cachep;
+/*static kmem_cache_t *radix_tree_node_cachep;*/
 
 /*
  * This assumes that the caller has performed appropriate preallocation, and
  * that the caller has pinned this thread of control to the current CPU.
  */
 static struct radix_tree_node *
-radix_tree_node_alloc(struct radix_tree_root *root)
+radix_tree_node_alloc(kmem_cache_t *rtn_cachep, struct radix_tree_root *root)
 {
     /*struct radix_tree_node *node = (struct radix_tree_node *)(kmem_get_obj(radix_tree_node_cachep));*/
-    struct radix_tree_node *node = (struct radix_tree_node *)(radix_tree_node_cachep->kmem_ops->get_obj(radix_tree_node_cachep));
+    struct radix_tree_node *node = (struct radix_tree_node *)(rtn_cachep->kmem_ops->get_obj(rtn_cachep));
 
     return node;
 }
 
 static inline void
-radix_tree_node_free(struct radix_tree_node *node)
+radix_tree_node_free(kmem_cache_t * rtn_cachep, struct radix_tree_node *node)
 {
     /*kmem_cache_free(radix_tree_node_cachep, node);*/
-    radix_tree_node_cachep->kmem_ops->free_obj(node);
+    rtn_cachep->kmem_ops->free_obj(node);
 }
 
 
@@ -124,7 +123,7 @@ static inline unsigned long radix_tree_maxindex(unsigned int height)
 /*
  *	Extend a radix tree so it can store key @index.
  */
-static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
+static int radix_tree_extend(kmem_cache_t *rtn_cachep, struct radix_tree_root *root, unsigned long index)
 {
     struct radix_tree_node *node;
     unsigned int height;
@@ -152,7 +151,7 @@ static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
     }
 
     do {
-        if (!(node = radix_tree_node_alloc(root)))
+        if (!(node = radix_tree_node_alloc(rtn_cachep, root)))
             return -ENOMEM;
 
         /* Increase the height.  */
@@ -180,7 +179,7 @@ out:
  *
  *	Insert an item into the radix tree at position @index.
  */
-int radix_tree_insert(struct radix_tree_root *root,
+int radix_tree_insert(kmem_cache_t *rtn_cachep, struct radix_tree_root *root,
         unsigned long index, void *item)
 {
     struct radix_tree_node *node = NULL, *slot;
@@ -191,7 +190,7 @@ int radix_tree_insert(struct radix_tree_root *root,
     /* Make sure the tree is high enough.  */
     if ((!index && !root->rnode) ||
             index > radix_tree_maxindex(root->height)) {
-        error = radix_tree_extend(root, index);
+        error = radix_tree_extend(rtn_cachep, root, index);
         if (error)
             return error;
     }
@@ -204,7 +203,7 @@ int radix_tree_insert(struct radix_tree_root *root,
     do {
         if (slot == NULL) {
             /* Have to add a child node.  */
-            if (!(slot = radix_tree_node_alloc(root)))
+            if (!(slot = radix_tree_node_alloc(rtn_cachep, root)))
                 return -ENOMEM;
             if (node) {
                 node->slots[offset] = slot;
@@ -621,7 +620,7 @@ radix_tree_gang_lookup_tag(struct radix_tree_root *root, void **results,
  *	radix_tree_shrink    -    shrink height of a radix tree to minimal
  *	@root		radix tree root
  */
-static inline void radix_tree_shrink(struct radix_tree_root *root)
+static inline void radix_tree_shrink(kmem_cache_t *rtn_cachep, struct radix_tree_root *root)
 {
     /* try to shrink tree height */
     while (root->height > 1 &&
@@ -636,7 +635,7 @@ static inline void radix_tree_shrink(struct radix_tree_root *root)
         tag_clear(to_free, 1, 0);
         to_free->slots[0] = NULL;
         to_free->count = 0;
-        radix_tree_node_free(to_free);
+        radix_tree_node_free(rtn_cachep, to_free);
     }
 }
 
@@ -649,7 +648,7 @@ static inline void radix_tree_shrink(struct radix_tree_root *root)
  *
  *	Returns the address of the deleted item, or NULL if it was not present.
  */
-void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
+void *radix_tree_delete(kmem_cache_t *rtn_cachep, struct radix_tree_root *root, unsigned long index)
 {
     struct radix_tree_path path[RADIX_TREE_MAX_PATH], *pathp = path;
     struct radix_tree_path *orig_pathp;
@@ -722,12 +721,12 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
 
         if (pathp->node->count) {
             if (pathp->node == root->rnode)
-                radix_tree_shrink(root);
+                radix_tree_shrink(rtn_cachep, root);
             goto out;
         }
 
         /* Node with zero slots in use so free it */
-        radix_tree_node_free(pathp->node);
+        radix_tree_node_free(rtn_cachep, pathp->node);
     }
     root->rnode = NULL;
     root->height = 0;
@@ -772,8 +771,8 @@ static void radix_tree_init_maxindex(void)
         height_to_maxindex[i] = __maxindex(i);
 }
 
-void radix_tree_init(void)
+void radix_tree_init(kmem_cache_t **rtn_cachep)
 {
-    radix_tree_node_cachep = kmem_cache_create("radix_tree_node",sizeof(struct radix_tree_node), 0);
+    *rtn_cachep = kmem_cache_create("radix_tree_node",sizeof(struct radix_tree_node), 0);
     radix_tree_init_maxindex();
 }

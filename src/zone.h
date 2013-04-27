@@ -9,6 +9,7 @@
 #include "swap.h"
 #include "mcb.h"
 #include "uio.h"
+#include "mapping.h"
 
 typedef struct vzone 
 {
@@ -21,7 +22,23 @@ typedef struct vzone
     struct list_head zone_list;     /* for zonelist */
     struct list_head pfra_list;     /* for pfra */
 
+    /* active page */
+    struct list_head active_list;
+    unsigned long nr_active;
+    /* inactive page */
+    struct list_head inactive_list;
+    unsigned long nr_inactive;
+
+    struct list_head shrink_list;
+    unsigned long  nr_shrink;
+
+    uint8_t shrink_ratio;
+
 }vzone_t;
+
+extern int vzone_alloc(const unsigned int id);
+extern int vzone_free(struct vzone *zone);
+extern struct vzone * get_vzone(const unsigned int id);
 
 typedef struct pgdata
 {
@@ -51,10 +68,6 @@ typedef struct pgdata
 #define     PGDATA_SHRINK_RATIO        2
 #define     PGDATA_URGENCY_RATIO       1
 #define     PGDATA_URGENCY(pgdata)    (pgdata->is_urgency == 1)
-
-int vzone_alloc(const unsigned int id);
-int vzone_free(struct vzone *zone);
-struct vzone * get_vzone(const unsigned int id);
 
 extern unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t size, unsigned long flags);
 extern int v_free_page(struct vzone *zone, void *address);
