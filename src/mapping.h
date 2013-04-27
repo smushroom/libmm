@@ -2,6 +2,7 @@
 #define     _MAPPING_H_
 
 #include "list.h"
+#include "slab.h"
 #include "zone.h"
 #include "radix-tree.h"
 
@@ -28,8 +29,8 @@ struct address_mapping
 {
     struct vzone *zone;
     struct radix_tree_root radix_root;
+    kmem_cache_t *rtn_cachep;
     struct address_mapping_operation *a_ops;
-
     //rw_lock_t a_lock;
 };
 

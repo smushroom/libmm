@@ -64,14 +64,6 @@ struct pgdata * pgdata_alloc()
     return pgdata;
 }
 
-void print_list_nr()
-{
-    DD("v_writepage active page = %ld.", pg_data->nr_active);
-    DD("v_writepage inactive page = %ld.", pg_data->nr_inactive);
-    DD("v_writepage shrink page = %ld.", pg_data->nr_shrink);
-}
-
-
 /* free zone  */
 int vzone_free(struct vzone *zone)
 {
@@ -140,6 +132,14 @@ struct vzone * get_vzone(const unsigned int id)
     }
 
     return NULL;
+}
+
+
+void print_list_nr()
+{
+    DD("v_writepage active page = %ld.", pg_data->nr_active);
+    DD("v_writepage inactive page = %ld.", pg_data->nr_inactive);
+    DD("v_writepage shrink page = %ld.", pg_data->nr_shrink);
 }
 
 /* add a page to active list */

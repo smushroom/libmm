@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "debug.h"
-#include "mapping.h"
 #include "page.h"
 #include "slab.h"
 #include "pte.h"
+#include "mapping.h"
 
 /* lookup a page */
 static inline void * mapping_lookup(struct address_mapping *mapping, const unsigned long index)
@@ -25,7 +25,7 @@ static inline int mapping_insert(struct address_mapping *mapping, const unsigned
         return -1;
     }
 
-    return radix_tree_insert(&(mapping->radix_root), index, page);
+    return radix_tree_insert(mapping->rtn_cachep, &(mapping->radix_root), index, page);
 }
 
 /* remove a page */
@@ -36,7 +36,7 @@ static inline void* mapping_remove(struct address_mapping *mapping, const unsign
         return NULL;
     }
 
-    return radix_tree_delete(&(mapping->radix_root),index);
+    return radix_tree_delete(mapping->rtn_cachep, &(mapping->radix_root),index);
 };
 
 /* read a page */
@@ -87,14 +87,25 @@ struct address_mapping_operation mops =
     .removepage = mapping_remove,
 };
 
+static int mapping_init(struct address_mapping *mapping)
+{
+    radix_tree_init(&mapping->rtn_cachep);
+}
+
 /* mapping alloc */
 struct address_mapping* mapping_alloc()
 {
     struct address_mapping *mapping = (struct address_mapping *)malloc(sizeof(struct address_mapping));
+    if(mapping == NULL)
+    {
+        DD("malloc mapping error.");
+        return NULL;
+    }
+
     mapping->a_ops = &mops;
 
+    mapping_init(mapping);
     /* radix tree page mapping */
-    radix_tree_init();
 
     return mapping;
 }
