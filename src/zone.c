@@ -31,16 +31,22 @@ static int pgdata_init(struct pgdata *pgdata)
     INIT_LIST_HEAD(&pgdata->inactive_list);
     INIT_LIST_HEAD(&pgdata->shrink_list);
 
-    if((pthread_mutex_init(&pgdata->shrink_lock, NULL)) < 0)
+    if((pthread_mutex_init(&pgdata->mutex_lock, NULL)) != 0)
     {
-        DD("pthread_mutex_init shrink_lock error : %s.", strerror(errno));
+        DD("pthread_mutex_init mutex_lock error : %s.", strerror(errno));
         return -2;
     }
 
-    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) < 0)
+    if((pthread_mutex_init(&pgdata->shrink_lock, NULL)) != 0)
+    {
+        DD("pthread_mutex_init shrink_lock error : %s.", strerror(errno));
+        return -3;
+    }
+
+    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) != 0)
     {
         DD("pthread_cond_init shrink_lock error : %s.", strerror(errno));
-        return -3;
+        return -4;
     }
 
     pgdata->is_urgency = 0;
@@ -62,6 +68,10 @@ struct pgdata * pgdata_alloc()
     pgdata_init(pgdata);
 
     return pgdata;
+}
+
+static unsigned long get_reserve_mem()
+{
 }
 
 /* free zone  */
@@ -99,13 +109,13 @@ int vzone_alloc(const unsigned int id)
 
     list_add(&zone->zone_list, &pg_data->zonelist);
 
-    if(kmem_mcb_init() < 0)
+    if(kmem_mcb_init() != 0)
     {
         DD("kmem_mcb_init error.");
         return -3;
     }
 
-    if(kmem_uio_init() < 0)
+    if(kmem_uio_init() != 0)
     {
         DD("kmem_uio_init error.");
         return -4;
@@ -339,7 +349,7 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
     {
         if(mapping->a_ops->insertpage)
         {
-            if((ret = mapping->a_ops->insertpage(mapping, page_to_index(page),page)) < 0)
+            if((ret = mapping->a_ops->insertpage(mapping, page_to_index(page),page)) != 0)
             {
                 DD("mapping_insert error. ret = %d.", ret);
                 return 0;
@@ -447,7 +457,7 @@ static int do_free_to_swap(struct vzone *zone, const void *address, swp_entry_t 
 
     while(pte && i < nr_pages)
     {
-        if(_do_free_to_swap(pte, entry) < 0)
+        if(_do_free_to_swap(pte, entry) != 0)
         {
             DD("_do_free_to_swap error.");
             return -3;
@@ -510,7 +520,7 @@ int v_free_page(struct vzone *zone, void *address)
             }
 
             /* free page */
-            if(free_pages(page, page->order) < 0)
+            if(free_pages(page, page->order) != 0)
             {
                 DD("free_pages error.");
                 return -3;
@@ -523,7 +533,7 @@ int v_free_page(struct vzone *zone, void *address)
             swp_entry_t entry;
             swp_entry(pte_index(pte), 0,pte_type(pte), &entry);
 
-            if(do_swp_freepage(entry) < 0)
+            if(do_swp_freepage(entry) != 0)
             {
                 DD("v_free_swap error.");
                 return -2;
@@ -725,7 +735,7 @@ static int _v_readpage(struct vzone *zone, pte_t *pte, unsigned long flags, uio_
         DD("read page flags = 0x%lx", page->flags);
         if(PAGE_present(page->flags))
         {
-            if(generic_readpage(zone, page) < 0)
+            if(generic_readpage(zone, page) != 0)
             {
                 DD("read page is not in mapping.");
                 return -3;
@@ -739,7 +749,7 @@ static int _v_readpage(struct vzone *zone, pte_t *pte, unsigned long flags, uio_
     {
         if(BIO_sync(flags))
         {
-            if((*new_address = do_readpage_slow(zone, pte, flags)) < 0)
+            if((*new_address = do_readpage_slow(zone, pte, flags)) <= 0)
             {
                 DD("do_readpage_slow error.");
                 return -4;
@@ -863,7 +873,7 @@ static int _v_writepage(struct vzone *zone, pte_t *pte, unsigned long flags, uio
         DD("_v_writepage : page mapping = 0x%p", page->mapping);
         if(PAGE_present(page->flags))
         {
-            if(generic_writepage(zone, page) < 0)
+            if(generic_writepage(zone, page) != 0)
             {
                 DD("mapping writepage error.");
                 return -3;
@@ -875,7 +885,7 @@ static int _v_writepage(struct vzone *zone, pte_t *pte, unsigned long flags, uio
         if(BIO_sync(flags))
         {
             /*unsigned long new_address;*/
-            if((*new_address = do_writepage_slow(zone, pte, flags)) == 0)
+            if((*new_address = do_writepage_slow(zone, pte, flags)) <= 0)
             {
                 DD("do_writepage_slow error.");
                 return -4;
@@ -994,10 +1004,10 @@ static int _v_lookup_page(struct vzone *zone, pte_t *pte)
 
     struct address_mapping *mapping = zone->mapping;
     struct page *page = NULL;
-    if(mapping->a_ops->lookuppage)
+    if(mapping->a_ops->lookup_page)
     {
         DD("lookup index = %ld.", pte_index(pte));
-        if((page = mapping->a_ops->lookuppage(mapping, pte_index(pte))) == NULL)
+        if((page = mapping->a_ops->lookup_page(mapping, pte_index(pte))) == NULL)
         {
             DD("can't find page : index = %ld ", pte_index(pte));
             return -2;
@@ -1021,7 +1031,7 @@ int v_lookup_page(struct vzone *zone, const void *address)
 
     while(pte && i < nr_pages)
     {
-        if(_v_lookup_page(zone, pte) < 0)
+        if(_v_lookup_page(zone, pte) != 0)
         {
             DD("pte not in memory : 0x%lx", (unsigned long)pte);
             return -2;
@@ -1172,7 +1182,7 @@ int shrink_page_list(struct pgdata *pgdata)
             if(PGDATA_URGENCY(pg_data))
             {
                 /* free page */
-                if(free_pages(page, 0) < 0)
+                if(free_pages(page, 0) != 0)
                 {
                     DD("free_pages error.");
                 }
@@ -1196,7 +1206,7 @@ int shrink_page_list(struct pgdata *pgdata)
 
                     put_pte(pte);
                 }
-                if(free_pages(page, 0) < 0)
+                if(free_pages(page, 0) != 0)
                 {
                     DD("free_pages error.");
                 }
@@ -1214,24 +1224,57 @@ int shrink_page_list(struct pgdata *pgdata)
     return 0;
 }
 
-/* shrink page from one vzone*/
-int shrink_zone(struct vzone *zone)
+/* shrink all page from one vzone*/
+int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
 {
-    if(zone == NULL)
+    if(pgdata == NULL || zone == NULL)
     {
         return -1;
     }
 
-    struct list_head *head, *pos, *n;
-    head = &pg_data->shrink_list;
+    int i, nr = 0;
     struct page *page = NULL;
+    struct address_mapping *mapping = zone->mapping;
 
-    list_for_each_safe(pos, n, head)
+    pthread_mutex_lock(&pg_data->mutex_lock);
+    void **results = (void **)get_reserve_mem(); 
+
+    if(mapping->a_ops->lookup_pages)
     {
-        page = list_entry(pos, struct page, lru);
+        nr = mapping->a_ops->lookup_pages(mapping,results, 1, mapping->nr_pages);
+        for(i = 0;i < nr; ++i)
+        {
+            page = (struct page *)results[i];
+            if(mapping->a_ops->removepage)
+            {
+                if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                {
+                    DD("shrink_zone remove page error.");
+                }
+
+                del_active_list(pgdata, &page->lru);
+
+                if(free_page(page) != 0)
+                {
+                    DD("shrink_zone free_page error.");
+                    return -2;
+                }
+
+            }
+            else
+            {
+                DD("shrink_zone no removepage functions.");
+                return -3;
+            }
+        }
+    }
+    else
+    {
+        DD("shrink_zone no lookup_pages functions.");
+        return -4;
     }
 
-    return 0;
+    pthread_mutex_unlock(&pg_data->mutex_lock);
 }
 
 /* swap shrink page */
@@ -1345,7 +1388,7 @@ void * kswp_thread_fn(void *args)
                 zone = list_entry(pos, struct vzone, zone_list);
                 mapping = zone->mapping;
 
-                if(swap_page_list(pg_data) < 0)
+                if(swap_page_list(pg_data) != 0)
                 {
                     DD("swap_page_list error.");
                 }
@@ -1375,7 +1418,7 @@ void *kreclaim_thread_fn(void *args)
         }
 
         DD("shrink page list nr = %ld.", pg_data->nr_shrink);
-        if(shrink_page_list(pg_data) < 0)
+        if(shrink_page_list(pg_data) != 0)
         {
             DD("shrink_list error.");
             return;
