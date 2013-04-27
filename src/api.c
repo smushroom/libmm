@@ -10,20 +10,6 @@
 #include "uio.h"
 #include "api.h"
 
-<<<<<<< HEAD
-void * lmalloc(const int prio, const size_t size, unsigned long flags)
-{
-    unsigned int id = pthread_self();
-    struct vzone *zone = get_vzone(id);
-
-    return (void *)v_alloc_page(zone, prio, size, flags);
-}
-
-void * lzalloc(const int prio, const size_t size, unsigned long flags)
-{
-    unsigned int id = pthread_self();
-    struct vzone *zone = get_vzone(id);
-=======
 static void * _lmalloc(const int prio, const size_t size, unsigned long flags)
 {
     unsigned int id = pthread_self();
@@ -48,7 +34,6 @@ static void * _lzalloc(const int prio, const size_t size, unsigned long flags)
     return (void *)v_alloc_page(zone, prio, size, flags); 
     /*addr_t address  = page_address(page);*/
     /*memset((void *)address, 0, size);*/
->>>>>>> develop
 
     return (void *)v_alloc_page(zone, prio, size, flags); 
 }
