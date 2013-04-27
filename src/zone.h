@@ -25,7 +25,7 @@ typedef struct vzone
 }vzone_t;
 
 extern int vzone_alloc(const unsigned int id);
-extern int vzone_free(struct vzone *zone);
+extern int vzone_free(const unsigned int id);
 extern struct vzone * get_vzone(const unsigned int id);
 
 typedef struct pgdata

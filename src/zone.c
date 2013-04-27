@@ -56,6 +56,19 @@ static int pgdata_init(struct pgdata *pgdata)
     pgdata->nr_inactive = 0;
     pgdata->nr_shrink = 0;
 
+    if(kmem_mcb_init() != 0)
+    {
+        DD("kmem_mcb_init error.");
+        return -3;
+    }
+
+    if(kmem_uio_init() != 0)
+    {
+        DD("kmem_uio_init error.");
+        return -4;
+    }
+
+
     return 0;
 }
 
@@ -70,15 +83,33 @@ struct pgdata * pgdata_alloc()
     return pgdata;
 }
 
-static unsigned long get_reserve_mem()
+/* get zone by id */
+struct vzone * get_vzone(const unsigned int id)
 {
+    struct vzone *zone = NULL;
+    struct list_head *pos, *n, *head;
+
+    head = &pg_data->zonelist;
+
+    list_for_each_safe(pos, n, head)
+    {
+        zone = list_entry(pos, struct vzone, zone_list);
+        if(zone && (zone->id == id))
+        {
+            return zone;
+        }
+    }
+
+    return NULL;
 }
 
 /* free zone  */
-int vzone_free(struct vzone *zone)
+int vzone_free(const unsigned int id)
 {
+    struct vzone *zone = get_vzone(id);
     if(zone)
     {
+        shrink_zone(pg_data, zone);
         free(zone->mapping);
         free(zone);
         return 0;
@@ -109,41 +140,8 @@ int vzone_alloc(const unsigned int id)
 
     list_add(&zone->zone_list, &pg_data->zonelist);
 
-    if(kmem_mcb_init() != 0)
-    {
-        DD("kmem_mcb_init error.");
-        return -3;
-    }
-
-    if(kmem_uio_init() != 0)
-    {
-        DD("kmem_uio_init error.");
-        return -4;
-    }
-
     return 0;
 }
-
-/* get zone by id */
-struct vzone * get_vzone(const unsigned int id)
-{
-    struct vzone *zone = NULL;
-    struct list_head *pos, *n, *head;
-
-    head = &pg_data->zonelist;
-
-    list_for_each_safe(pos, n, head)
-    {
-        zone = list_entry(pos, struct vzone, zone_list);
-        if(zone && (zone->id == id))
-        {
-            return zone;
-        }
-    }
-
-    return NULL;
-}
-
 
 void print_list_nr()
 {
@@ -1232,6 +1230,7 @@ int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
         return -1;
     }
 
+    int ret;
     int i, nr = 0;
     struct page *page = NULL;
     struct address_mapping *mapping = zone->mapping;
@@ -1254,12 +1253,12 @@ int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
 
                 del_active_list(pgdata, &page->lru);
 
-                if(free_page(page) != 0)
+                DD("shrink_zone free page : 0x%lx", page_address(page));
+                if((ret = free_page(page)) < 0)
                 {
                     DD("shrink_zone free_page error.");
                     return -2;
                 }
-
             }
             else
             {
