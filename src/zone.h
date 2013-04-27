@@ -22,18 +22,6 @@ typedef struct vzone
     struct list_head zone_list;     /* for zonelist */
     struct list_head pfra_list;     /* for pfra */
 
-    /* active page */
-    struct list_head active_list;
-    unsigned long nr_active;
-    /* inactive page */
-    struct list_head inactive_list;
-    unsigned long nr_inactive;
-
-    struct list_head shrink_list;
-    unsigned long  nr_shrink;
-
-    uint8_t shrink_ratio;
-
 }vzone_t;
 
 extern int vzone_alloc(const unsigned int id);
@@ -42,6 +30,8 @@ extern struct vzone * get_vzone(const unsigned int id);
 
 typedef struct pgdata
 {
+    pthread_mutex_t mutex_lock;
+
     struct list_head zonelist;
     unsigned long nr_pages;
 
@@ -62,6 +52,8 @@ typedef struct pgdata
 
     /* is pfra urgency ? */
     uint8_t is_urgency;
+
+    unsigned long reserve_room;
 }pgdata_t;
 
 #define     PGDATA_SHRINK_NR           32

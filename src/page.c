@@ -8,7 +8,8 @@
 #include "slab.h"
 
 static struct page **mem_map = NULL;
-static addr_t start_page_mem = 0;
+static unsigned long start_page_mem = 0;
+static unsigned long reserve_page_mem = 0;
 
 static int fallbacks[MIGRATE_TYPES][MIGRATE_TYPES - 1] = 
 {
@@ -233,6 +234,11 @@ struct page * get_free_page(const uint32_t prio)
     return get_free_pages(prio, 0);
 }
 
+inline unsigned long get_reserve_mem()
+{
+    return reserve_page_mem;
+}
+
 int init_buddy()
 {
     int i = 0, ret;
@@ -244,8 +250,8 @@ int init_buddy()
 
     mem_map = (struct page **)malloc(DEFAULT_PAGE_FNS * sizeof(struct page *));
     page_ptr = (addr_t*)malloc(DEFAULT_PAGE_FNS * sizeof(struct page));
-    start_page_mem = (addr_t)malloc(DEFAULT_PAGE_FNS * PAGE_SIZE);
-    start_page_mem = (addr_t)memalign(PAGE_SIZE, DEFAULT_PAGE_FNS * PAGE_SIZE);
+    start_page_mem = (addr_t)malloc((DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);
+    start_page_mem = (addr_t)memalign(PAGE_SIZE, (DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);
 
     p = (struct page *)page_ptr;
     address = start_page_mem;
@@ -265,6 +271,7 @@ int init_buddy()
         }
     }
 
+    reserve_page_mem = start_page_mem + (DEFAULT_PAGE_FNS << PAGE_SHIFT);
     /* buddy  */
     buddy_list_tidy(start_page_mem, DEFAULT_PAGE_FNS);
 

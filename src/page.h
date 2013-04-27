@@ -5,7 +5,8 @@
 #include "list.h"
 #include "types.h"
 
-#define     DEFAULT_PAGE_FNS   1024 
+#define     DEFAULT_PAGE_FNS    (1024*16)
+#define     RESERVE_PAGE_FNS    128 
 
 #define     PAGE_SHIFT  12 
 #define     PAGE_SIZE   (1 << PAGE_SHIFT) 
@@ -87,6 +88,7 @@ extern inline unsigned long index_to_pfn(unsigned long index);
 extern inline struct page * index_to_page(unsigned long index);
 extern inline unsigned long page_to_index(const struct page *page);
 extern inline addr_t page_address(const struct page *page);
+extern inline unsigned long get_reserve_mem();
 
 static inline uint32_t size_to_order(const size_t size)
 {
