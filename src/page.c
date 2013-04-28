@@ -1,14 +1,13 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include <string.h>
-#include <math.h>
 #include "debug.h"
 #include "page.h"
 #include "buddy.h"
 #include "slab.h"
 
 static struct page **mem_map = NULL;
-static addr_t start_page_mem = 0;
+static unsigned long start_page_mem = 0;
 
 static int fallbacks[MIGRATE_TYPES][MIGRATE_TYPES - 1] = 
 {
@@ -62,6 +61,8 @@ static inline int free_pages_ok(struct page *page, const uint32_t order)
         DD("free_list_add_line error. ");
         return -3;
     }
+
+    buddy_list.nr_free_pages  += 1 << order;
 
     addr_t address = page_address(page);
     memset((void *)address, 0, order << PAGE_SHIFT);
@@ -183,6 +184,7 @@ static int sep_list_from_area(const uint32_t prio, uint32_t order)
     return -2;
 }
 
+/* get page from list */
 struct page * _get_free_pages(const uint32_t prio, const uint32_t order)
 {
     if(order >= NR_MEM_LISTS)
@@ -200,6 +202,7 @@ repeat:
 
     if((page = get_page_from_list(cur_prio, cur_order)))
     {
+        buddy_list.nr_free_pages -= 1 << cur_order;
         return page;
     }
     else
@@ -225,6 +228,7 @@ repeat:
 struct page * get_free_pages(const uint32_t prio, const uint32_t order)
 {
     /*if(priority == GFP_ATOMIC)*/
+    DD("order = %d.", order);
     return _get_free_pages(prio, order);
 }
 
@@ -233,7 +237,12 @@ struct page * get_free_page(const uint32_t prio)
     return get_free_pages(prio, 0);
 }
 
-int init_buddy()
+/*inline unsigned long get_reserve_mem()*/
+/*{*/
+    /*return reserve_page_mem;*/
+/*}*/
+
+int init_buddy(unsigned long *start_mem, unsigned long *reserve_mem)
 {
     int i = 0, ret;
     struct page *p = NULL;
@@ -244,8 +253,9 @@ int init_buddy()
 
     mem_map = (struct page **)malloc(DEFAULT_PAGE_FNS * sizeof(struct page *));
     page_ptr = (addr_t*)malloc(DEFAULT_PAGE_FNS * sizeof(struct page));
-    start_page_mem = (addr_t)malloc(DEFAULT_PAGE_FNS * PAGE_SIZE);
-    start_page_mem = (addr_t)memalign(PAGE_SIZE, DEFAULT_PAGE_FNS * PAGE_SIZE);
+    /*start_page_mem = (addr_t)malloc((DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);*/
+    start_page_mem = (addr_t)memalign(PAGE_SIZE, (DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);
+    *start_mem = start_page_mem;
 
     p = (struct page *)page_ptr;
     address = start_page_mem;
@@ -265,6 +275,7 @@ int init_buddy()
         }
     }
 
+    *reserve_mem = start_page_mem + (DEFAULT_PAGE_FNS << PAGE_SHIFT);
     /* buddy  */
     buddy_list_tidy(start_page_mem, DEFAULT_PAGE_FNS);
 

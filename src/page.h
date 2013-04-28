@@ -2,10 +2,12 @@
 #define     _PAGE_H_
 
 #include <stdio.h>
+#include <math.h>
 #include "list.h"
 #include "types.h"
 
-#define     DEFAULT_PAGE_FNS   1024 
+#define     DEFAULT_PAGE_FNS    (1024*16)
+#define     RESERVE_PAGE_FNS    128 
 
 #define     PAGE_SHIFT  12 
 #define     PAGE_SIZE   (1 << PAGE_SHIFT) 
@@ -41,6 +43,8 @@ enum PAGE_STATE
     PAGE_SHARED = (1<<8),
     PAGE_SYNC = (1 << 9),
     PAGE_ASYNC = (1 << 10),
+    PAGE_LOCK = (1<<11),    /* lock not swap out */
+    PAGE_UNLOCK = (1<<12),   
 };
 
 #define     PAGE_present(flags)     (flags & PAGE_PRESENT)
@@ -52,6 +56,8 @@ enum PAGE_STATE
 #define     PAGE_referenced(flags)  (flags & PAGE_REFERENCED)
 #define     PAGE_private(flags)     (flags & PAGE_PRIVATE)
 #define     PAGE_shared(flags)      (flags & PAGE_SHARED)
+#define     PAGE_lock(flags)        (flags & PAGE_LOCK)
+#define     PAGE_unlock(flags)      (flags & PAGE_UNLOCK)
 
 static inline void page_sflags(struct page *page, unsigned long flags)
 {
@@ -74,7 +80,7 @@ enum PAGE_MIGRATE
     MIGRATE_TYPES
 };
 
-extern int init_buddy();
+extern int init_buddy(unsigned long *start_mem, unsigned long *reserve_mem);
 extern struct page* get_free_pages(const uint32_t prio,const uint32_t order);
 extern struct page * get_free_page(const uint32_t prio);
 extern int free_pages(struct page *page, const uint32_t order);
@@ -87,10 +93,25 @@ extern inline unsigned long index_to_pfn(unsigned long index);
 extern inline struct page * index_to_page(unsigned long index);
 extern inline unsigned long page_to_index(const struct page *page);
 extern inline addr_t page_address(const struct page *page);
+extern inline unsigned long get_reserve_mem();
 
 static inline uint32_t size_to_order(const size_t size)
 {
-    return (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    double d = log(2);
+    double f = log((size>>PAGE_SHIFT));
+
+    double e = f/d;
+    int order = (int)e;
+
+    if(e > order)
+    {
+        return (order + 1);
+    }
+
+    else
+    {
+        return order;
+    }
 }
 
 #define     free_page(page)     free_pages((page), 0)

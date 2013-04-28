@@ -26,5 +26,8 @@ Makefile
 configure
 autom4te.cache
 
+# Test
+test
+
 # Ctags and Cscope
 tags

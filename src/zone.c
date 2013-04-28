@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <math.h>
 #include "debug.h"
 #include "zone.h"
 #include "mapping.h"
@@ -31,24 +32,57 @@ static int pgdata_init(struct pgdata *pgdata)
     INIT_LIST_HEAD(&pgdata->inactive_list);
     INIT_LIST_HEAD(&pgdata->shrink_list);
 
-    if((pthread_mutex_init(&pgdata->shrink_lock, NULL)) < 0)
+    if((pthread_mutex_init(&pgdata->mutex_lock, NULL)) != 0)
     {
-        DD("pthread_mutex_init shrink_lock error : %s.", strerror(errno));
+        DD("pthread_mutex_init mutex_lock error : %s.", strerror(errno));
         return -2;
     }
 
-    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) < 0)
+    if((pthread_mutex_init(&pgdata->shrink_lock, NULL)) != 0)
     {
-        DD("pthread_cond_init shrink_lock error : %s.", strerror(errno));
+        DD("pthread_mutex_init shrink_lock error : %s.", strerror(errno));
         return -3;
     }
+
+    if((pthread_mutex_init(&pgdata->swap_lock, NULL)) != 0)
+    {
+        DD("pthread_mutex_init swap_lock error : %s.", strerror(errno));
+        return -3;
+    }
+
+    if((pthread_cond_init(&pgdata->swap_cond, NULL)) != 0)
+    {
+        DD("pthread_cond_init swap_cond  error : %s.", strerror(errno));
+        return -4;
+    }
+
+    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) != 0)
+    {
+        DD("pthread_cond_init shrink_cond error : %s.", strerror(errno));
+        return -4;
+    }
+
 
     pgdata->is_urgency = 0;
     pgdata->shrink_ratio = PGDATA_SHRINK_RATIO;
     pgdata->nr_pages = DEFAULT_PAGE_FNS;
+    pgdata->nr_reserve_pages = RESERVE_PAGE_FNS;
     pgdata->nr_active = 0;
     pgdata->nr_inactive = 0;
     pgdata->nr_shrink = 0;
+
+    if(kmem_mcb_init() != 0)
+    {
+        DD("kmem_mcb_init error.");
+        return -3;
+    }
+
+    if(kmem_uio_init() != 0)
+    {
+        DD("kmem_uio_init error.");
+        return -4;
+    }
+
 
     return 0;
 }
@@ -64,19 +98,33 @@ struct pgdata * pgdata_alloc()
     return pgdata;
 }
 
-void print_list_nr()
+/* get zone by id */
+struct vzone * get_vzone(const unsigned int id)
 {
-    DD("v_writepage active page = %ld.", pg_data->nr_active);
-    DD("v_writepage inactive page = %ld.", pg_data->nr_inactive);
-    DD("v_writepage shrink page = %ld.", pg_data->nr_shrink);
+    struct vzone *zone = NULL;
+    struct list_head *pos, *n, *head;
+
+    head = &pg_data->zonelist;
+
+    list_for_each_safe(pos, n, head)
+    {
+        zone = list_entry(pos, struct vzone, zone_list);
+        if(zone && (zone->id == id))
+        {
+            return zone;
+        }
+    }
+
+    return NULL;
 }
 
-
 /* free zone  */
-int vzone_free(struct vzone *zone)
+int vzone_free(const unsigned int id)
 {
+    struct vzone *zone = get_vzone(id);
     if(zone)
     {
+        shrink_zone(pg_data, zone);
         free(zone->mapping);
         free(zone);
         return 0;
@@ -107,39 +155,15 @@ int vzone_alloc(const unsigned int id)
 
     list_add(&zone->zone_list, &pg_data->zonelist);
 
-    if(kmem_mcb_init() < 0)
-    {
-        DD("kmem_mcb_init error.");
-        return -3;
-    }
-
-    if(kmem_uio_init() < 0)
-    {
-        DD("kmem_uio_init error.");
-        return -4;
-    }
-
     return 0;
 }
 
-/* get zone by id */
-struct vzone * get_vzone(const unsigned int id)
+void print_list_nr()
 {
-    struct vzone *zone = NULL;
-    struct list_head *pos, *n, *head;
-
-    head = &pg_data->zonelist;
-
-    list_for_each_safe(pos, n, head)
-    {
-        zone = list_entry(pos, struct vzone, zone_list);
-        if(zone && (zone->id == id))
-        {
-            return zone;
-        }
-    }
-
-    return NULL;
+    DD("active page = %ld.", pg_data->nr_active);
+    DD("inactive page = %ld.", pg_data->nr_inactive);
+    DD("shrink page = %ld.", pg_data->nr_shrink);
+    DD("free page nr = %d.", get_free_pages_nr());
 }
 
 /* add a page to active list */
@@ -320,6 +344,8 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
         return 0;
     }
 
+    print_list_nr();
+
     struct page *origin_page = get_free_pages(prio, size_to_order(size));
 
     int i = 0, ret;
@@ -339,7 +365,7 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
     {
         if(mapping->a_ops->insertpage)
         {
-            if((ret = mapping->a_ops->insertpage(mapping, page_to_index(page),page)) < 0)
+            if((ret = mapping->a_ops->insertpage(mapping, page_to_index(page),page)) != 0)
             {
                 DD("mapping_insert error. ret = %d.", ret);
                 return 0;
@@ -351,10 +377,13 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
 
         BIO_private(flags)?page_sflags(page, PAGE_PRIVATE):page_sflags(page, PAGE_SHARED);
         BIO_sync(flags)?page_sflags(page, PAGE_SYNC):page_sflags(page, PAGE_ASYNC);
+        DD("flags = 0x%lx", flags);
+        DD("page flags = 0x%lx", page->flags);
+        BIO_lock(flags)?page_sflags(page, PAGE_LOCK):page_sflags(page, PAGE_UNLOCK);
+        DD("page flags = 0x%lx", page->flags);
 
         add_active_list(pg_data,&page->lru);
 
-        DD("page flags = 0x%lx", page->flags);
 
         page->mapping = mapping;
         DD("page address = 0x%lx", page_address(page));
@@ -383,6 +412,11 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
 
     print_list_nr();
 
+    if(BIO_lock(flags))
+    {
+        mlock(page_address(origin_page), size);
+    }
+
     return page_address(origin_page);
 }
 
@@ -391,41 +425,59 @@ static int _do_free_to_swap(pte_t *pte, swp_entry_t *entry)
     if(PTE_present(pte))
     {
         struct page *page = index_to_page(pte_index(pte));
-        if(PAGE_present(page->flags))
+        /* is page is lock ? */
+        DD("page flags = 0x%lx", page->flags);
+        if(PAGE_unlock(page->flags))
+        /*if(PAGE_lock(page->flags))*/
         {
-            struct address_mapping *mapping = (struct address_mapping *)page->mapping;
-            if(mapping->a_ops->removepage)
+            if(PAGE_present(page->flags))
             {
-                DD("mapping removepage.");
-                if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                struct address_mapping *mapping = (struct address_mapping *)page->mapping;
+                if(mapping->a_ops->removepage)
                 {
-                    DD("remove page error.");
+                    DD("mapping removepage.");
+                    if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                    {
+                        DD("remove page error.");
+                        return -3;
+                    }
+                }
+                DD("revove page index = %ld", page_to_index(page));
+
+                page->mapping = NULL;
+
+                page_cflags(page, PAGE_PRESENT);
+                page_sflags(page, PAGE_SWAPOUT);
+                page_cflags(page, PAGE_ACTIVE);
+                page_cflags(page, PAGE_REFERENCED);
+
+                DD("free to swap page flags = 0x%lx.", page->flags);
+                do_swp_writepage(page, entry);
+
+                DD("free to swap page->index = %ld.", page_to_index(page))
+                    del_active_list(pg_data, &page->lru);
+
+                make_pte(swp_offset(entry),0, swp_type(entry),pte);
+                DD("free to swap pte = 0x%lx.", pte->val);
+
+                /* free page */
+                if(free_pages(page, 0) != 0)
+                {
+                    DD("free_pages error.");
                     return -3;
                 }
             }
-            DD("revove page index = %ld", page_to_index(page));
-
-            page->mapping = NULL;
-
-            page_cflags(page, PAGE_PRESENT);
-            page_sflags(page, PAGE_SWAPOUT);
-            page_cflags(page, PAGE_ACTIVE);
-            page_cflags(page, PAGE_REFERENCED);
-
-            DD("free to swap page flags = 0x%lx.", page->flags);
-            do_swp_writepage(page, entry);
-
-            DD("free to swap page->index = %ld.", page_to_index(page))
-            del_active_list(pg_data, &page->lru);
-
-            make_pte(swp_offset(entry),0, swp_type(entry),pte);
-            DD("free to swap pte = 0x%lx.", pte->val);
+        }
+        else
+        {
+            DD("page is locked.");
+            return -4;
         }
     }
     else
     {
         DD("page is not in memory");
-        return -4;
+        return -5;
     }
 
     return 0;
@@ -447,7 +499,7 @@ static int do_free_to_swap(struct vzone *zone, const void *address, swp_entry_t 
 
     while(pte && i < nr_pages)
     {
-        if(_do_free_to_swap(pte, entry) < 0)
+        if(_do_free_to_swap(pte, entry) != 0)
         {
             DD("_do_free_to_swap error.");
             return -3;
@@ -510,7 +562,7 @@ int v_free_page(struct vzone *zone, void *address)
             }
 
             /* free page */
-            if(free_pages(page, page->order) < 0)
+            if(free_pages(page, page->order) != 0)
             {
                 DD("free_pages error.");
                 return -3;
@@ -523,7 +575,7 @@ int v_free_page(struct vzone *zone, void *address)
             swp_entry_t entry;
             swp_entry(pte_index(pte), 0,pte_type(pte), &entry);
 
-            if(do_swp_freepage(entry) < 0)
+            if(do_swp_freepage(entry) != 0)
             {
                 DD("v_free_swap error.");
                 return -2;
@@ -616,7 +668,7 @@ static unsigned long do_writepage_slow(struct vzone *zone, pte_t *pte, unsigned 
 
     if((ret = do_swp_readpage(entry, page)) != 0)
     {
-        DD("do_swp_writepage error. ret = %d.",ret);
+        DD("do_swp_readpage error. ret = %d.",ret);
         return 0;
     }
 
@@ -725,7 +777,7 @@ static int _v_readpage(struct vzone *zone, pte_t *pte, unsigned long flags, uio_
         DD("read page flags = 0x%lx", page->flags);
         if(PAGE_present(page->flags))
         {
-            if(generic_readpage(zone, page) < 0)
+            if(generic_readpage(zone, page) != 0)
             {
                 DD("read page is not in mapping.");
                 return -3;
@@ -739,7 +791,7 @@ static int _v_readpage(struct vzone *zone, pte_t *pte, unsigned long flags, uio_
     {
         if(BIO_sync(flags))
         {
-            if((*new_address = do_readpage_slow(zone, pte, flags)) < 0)
+            if((*new_address = do_readpage_slow(zone, pte, flags)) <= 0)
             {
                 DD("do_readpage_slow error.");
                 return -4;
@@ -863,7 +915,7 @@ static int _v_writepage(struct vzone *zone, pte_t *pte, unsigned long flags, uio
         DD("_v_writepage : page mapping = 0x%p", page->mapping);
         if(PAGE_present(page->flags))
         {
-            if(generic_writepage(zone, page) < 0)
+            if(generic_writepage(zone, page) != 0)
             {
                 DD("mapping writepage error.");
                 return -3;
@@ -875,7 +927,7 @@ static int _v_writepage(struct vzone *zone, pte_t *pte, unsigned long flags, uio
         if(BIO_sync(flags))
         {
             /*unsigned long new_address;*/
-            if((*new_address = do_writepage_slow(zone, pte, flags)) == 0)
+            if((*new_address = do_writepage_slow(zone, pte, flags)) <= 0)
             {
                 DD("do_writepage_slow error.");
                 return -4;
@@ -994,10 +1046,10 @@ static int _v_lookup_page(struct vzone *zone, pte_t *pte)
 
     struct address_mapping *mapping = zone->mapping;
     struct page *page = NULL;
-    if(mapping->a_ops->lookuppage)
+    if(mapping->a_ops->lookup_page)
     {
         DD("lookup index = %ld.", pte_index(pte));
-        if((page = mapping->a_ops->lookuppage(mapping, pte_index(pte))) == NULL)
+        if((page = mapping->a_ops->lookup_page(mapping, pte_index(pte))) == NULL)
         {
             DD("can't find page : index = %ld ", pte_index(pte));
             return -2;
@@ -1021,7 +1073,7 @@ int v_lookup_page(struct vzone *zone, const void *address)
 
     while(pte && i < nr_pages)
     {
-        if(_v_lookup_page(zone, pte) < 0)
+        if(_v_lookup_page(zone, pte) != 0)
         {
             DD("pte not in memory : 0x%lx", (unsigned long)pte);
             return -2;
@@ -1114,9 +1166,9 @@ static int shrink_active_list(struct pgdata *pgdata)
     return 0;
 }
 
-static inline unsigned int get_inactive_ratio(struct pgdata *pgdata)
+static inline unsigned int get_free_ratio(struct pgdata *pgdata)
 {
-    return ((pg_data->nr_inactive * 1000) / pg_data->nr_pages);
+    return ((get_free_pages_nr() * 100) / pg_data->nr_pages);
 }
 
 /* shrink list */
@@ -1146,13 +1198,8 @@ int shrink_page_list(struct pgdata *pgdata)
         PAGE_free(page->flags);
         DD("----------------------");
         DD("send signal to kswap.");
-        pthread_cond_signal(&pgdata->shrink_cond);
+        pthread_cond_signal(&pgdata->swap_cond);
         DD("----------------------");
-
-        if(get_inactive_ratio(pg_data) < pg_data->shrink_ratio)
-        {
-            return 0;
-        }
     }
 
     /* second  reclaim page*/
@@ -1172,7 +1219,7 @@ int shrink_page_list(struct pgdata *pgdata)
             if(PGDATA_URGENCY(pg_data))
             {
                 /* free page */
-                if(free_pages(page, 0) < 0)
+                if(free_pages(page, 0) != 0)
                 {
                     DD("free_pages error.");
                 }
@@ -1196,7 +1243,7 @@ int shrink_page_list(struct pgdata *pgdata)
 
                     put_pte(pte);
                 }
-                if(free_pages(page, 0) < 0)
+                if(free_pages(page, 0) != 0)
                 {
                     DD("free_pages error.");
                 }
@@ -1214,24 +1261,63 @@ int shrink_page_list(struct pgdata *pgdata)
     return 0;
 }
 
-/* shrink page from one vzone*/
-int shrink_zone(struct vzone *zone)
+/* shrink all page from one vzone*/
+int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
 {
-    if(zone == NULL)
+    if(pgdata == NULL || zone == NULL)
     {
         return -1;
     }
 
-    struct list_head *head, *pos, *n;
-    head = &pg_data->shrink_list;
+    int ret;
+    int i, nr = 0;
     struct page *page = NULL;
+    struct address_mapping *mapping = zone->mapping;
 
-    list_for_each_safe(pos, n, head)
+    pthread_mutex_lock(&pg_data->mutex_lock);
+    if((mapping->nr_pages * sizeof(void *)) > (pg_data->nr_reserve_pages << PAGE_SHIFT))
     {
-        page = list_entry(pos, struct page, lru);
+        DD("no enough reserve memory used!");
+        return -2;
+    }
+    void **results = (void **)pg_data->reserve_mem;; 
+
+    if(mapping->a_ops->lookup_pages)
+    {
+        nr = mapping->a_ops->lookup_pages(mapping,results, 1, mapping->nr_pages);
+        for(i = 0;i < nr; ++i)
+        {
+            page = (struct page *)results[i];
+            if(mapping->a_ops->removepage)
+            {
+                if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                {
+                    DD("shrink_zone remove page error.");
+                }
+
+                del_active_list(pgdata, &page->lru);
+
+                DD("shrink_zone free page : 0x%lx", page_address(page));
+                if((ret = free_page(page)) < 0)
+                {
+                    DD("shrink_zone free_page error.");
+                    return -2;
+                }
+            }
+            else
+            {
+                DD("shrink_zone no removepage functions.");
+                return -3;
+            }
+        }
+    }
+    else
+    {
+        DD("shrink_zone no lookup_pages functions.");
+        return -4;
     }
 
-    return 0;
+    pthread_mutex_unlock(&pg_data->mutex_lock);
 }
 
 /* swap shrink page */
@@ -1265,15 +1351,19 @@ static int swap_page_list(struct pgdata *pgdata)
             {
                 DD("*****************************");
                 DD("active list nr = %ld", pgdata->nr_active);
-                del_shrink_list(pgdata, pos);
+
                 pte = get_pte(&zone->pgd, page->pgd_index);
+
                 DD("shrink pte = 0x%lx", pte->val);
                 DD("active list nr = %ld", pgdata->nr_active);
 
                 swp_entry_t entry;
-                _do_free_to_swap((void *)pte, &entry);
-                /* fixed the bug */
-                ++(pgdata->nr_active);
+                if(_do_free_to_swap((void *)pte, &entry) == 0)
+                {
+                    /* fixed the bug */
+                    ++(pgdata->nr_active);
+                    del_shrink_list(pgdata, pos);
+                }
                 DD("******************");
                 DD("active list nr = %ld", pgdata->nr_active);
             }
@@ -1281,11 +1371,13 @@ static int swap_page_list(struct pgdata *pgdata)
             /* shared page */
             else if(PAGE_shared(page->flags))
             {
-                del_shrink_list(pgdata, pos);
                 pte = get_pte(&zone->pgd, page->pgd_index);
 
                 swp_entry_t entry;
-                _do_free_to_swap((void *)pte, &entry);
+                if(_do_free_to_swap((void *)pte, &entry) == 0)
+                {
+                    del_shrink_list(pgdata, pos);
+                }
 
                 head2 = &page->zone_list;
                 list_for_each_safe(pos2, n2, head2)
@@ -1306,6 +1398,29 @@ static int swap_page_list(struct pgdata *pgdata)
     return 0;
 }
 
+void * idle_thread_fn(void *args)
+{
+    while(1)
+    {
+        /* check global option */
+        /*check_options();*/
+
+        DD("free page_nr = %d.", get_free_pages_nr());
+        DD("all page = %d.", pg_data->nr_pages);
+        DD("free ratio = %d.", get_free_ratio(pg_data));
+
+        if(get_free_ratio(pg_data) < pg_data->shrink_ratio)
+        {
+            DD("----------------------");
+            DD("send signal to kreclaim");
+            DD("----------------------");
+            pthread_cond_signal(&pg_data->shrink_cond);
+        }
+
+        sleep(3);
+    }
+}
+
 /* kswap page thread */
 void * kswp_thread_fn(void *args)
 {
@@ -1315,21 +1430,15 @@ void * kswp_thread_fn(void *args)
 
     while(1)
     {
-        /*pthread_mutex_lock(&pg_data->shrink_lock);*/
-        DD("=================================================");
+        pthread_mutex_lock(&pg_data->swap_lock);
+        pthread_cond_wait(&pg_data->swap_cond, &pg_data->swap_lock);
+        pthread_mutex_unlock(&pg_data->swap_lock);
+
+        DD("==============================");
         DD("nr_inactive = %ld.", pg_data->nr_inactive);
         DD("nr_active = %ld.", pg_data->nr_active);
         DD("nr_shrink = %ld.", pg_data->nr_shrink);
         DD("nr_pages = %ld.", pg_data->nr_pages);
-
-        DD("(pg_data->nr_inactive * 1000) / pg_data->nr_pages = %ld", (pg_data->nr_inactive * 1000) / pg_data->nr_pages);
-        if(get_inactive_ratio(pg_data) < pg_data->shrink_ratio)
-        {
-            pthread_cond_wait(&pg_data->shrink_cond, &pg_data->shrink_lock);
-        }
-        pthread_mutex_unlock(&pg_data->shrink_lock);
-
-        DD("==============================");
         DD("wake up by kreclaim.");
         DD("==============================");
         head = &pg_data->zonelist;
@@ -1345,7 +1454,7 @@ void * kswp_thread_fn(void *args)
                 zone = list_entry(pos, struct vzone, zone_list);
                 mapping = zone->mapping;
 
-                if(swap_page_list(pg_data) < 0)
+                if(swap_page_list(pg_data) != 0)
                 {
                     DD("swap_page_list error.");
                 }
@@ -1365,7 +1474,14 @@ void *kreclaim_thread_fn(void *args)
 
     while(1)
     {
+        pthread_mutex_lock(&pg_data->shrink_lock);
+        pthread_cond_wait(&pg_data->shrink_cond, &pg_data->shrink_lock);
+        pthread_mutex_unlock(&pg_data->shrink_lock);
+
         DD("+++++++++++++++++++++++++++++++++++++++");
+        DD("wake up by idle thread.");
+        DD("+++++++++++++++++++++++++++++++++++++++");
+
         if(shrink_inactive_list(pg_data) < 1)
         {
             if(shrink_active_list(pg_data) < 1)
@@ -1375,7 +1491,7 @@ void *kreclaim_thread_fn(void *args)
         }
 
         DD("shrink page list nr = %ld.", pg_data->nr_shrink);
-        if(shrink_page_list(pg_data) < 0)
+        if(shrink_page_list(pg_data) != 0)
         {
             DD("shrink_list error.");
             return;
@@ -1389,7 +1505,10 @@ void *kreclaim_thread_fn(void *args)
 int init_mm()
 {
     /* buddy */
-    init_buddy();
+    unsigned long buddy_start_mem;
+    unsigned long buddy_reserve_mem;
+    init_buddy(&buddy_start_mem, &buddy_reserve_mem);
+
 
     /* slab */
     kmem_cache_init();
@@ -1398,6 +1517,10 @@ int init_mm()
     swp_on();
 
     pg_data = pgdata_alloc();
+    pg_data->start_mem = buddy_start_mem;
+    pg_data->reserve_mem = buddy_reserve_mem;
+
+    print_list_nr();
 
     /* thread */
     lthread_init();

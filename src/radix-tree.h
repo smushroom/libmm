@@ -19,6 +19,8 @@
 #ifndef _RADIX_TREE_H_
 #define _RADIX_TREE_H_
 
+#include "slab.h"
+
 typedef     unsigned    gfp_t;
 #define BITS_PER_LONG 64
 
@@ -44,15 +46,17 @@ do {									\
 	(root)->rnode = NULL;						\
 } while (0)
 
-int radix_tree_insert(struct radix_tree_root *, unsigned long, void *);
+//int radix_tree_insert(struct radix_tree_root *, unsigned long, void *);
+extern int radix_tree_insert(kmem_cache_t *, struct radix_tree_root *,unsigned long, void *);
 void *radix_tree_lookup(struct radix_tree_root *, unsigned long);
 void **radix_tree_lookup_slot(struct radix_tree_root *, unsigned long);
-void *radix_tree_delete(struct radix_tree_root *, unsigned long);
+extern void *radix_tree_delete(kmem_cache_t *, struct radix_tree_root *, unsigned long);
 unsigned int
 radix_tree_gang_lookup(struct radix_tree_root *root, void **results,
 			unsigned long first_index, unsigned int max_items);
 int radix_tree_preload(gfp_t gfp_mask);
-void radix_tree_init(void);
+//void radix_tree_init(void);
+void radix_tree_init(kmem_cache_t **);
 void *radix_tree_tag_set(struct radix_tree_root *root,
 			unsigned long index, int tag);
 void *radix_tree_tag_clear(struct radix_tree_root *root,
