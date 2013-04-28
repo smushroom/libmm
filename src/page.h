@@ -43,6 +43,8 @@ enum PAGE_STATE
     PAGE_SHARED = (1<<8),
     PAGE_SYNC = (1 << 9),
     PAGE_ASYNC = (1 << 10),
+    PAGE_LOCK = (1<<11),    /* lock not swap out */
+    PAGE_UNLOCK = (1<<12),   
 };
 
 #define     PAGE_present(flags)     (flags & PAGE_PRESENT)
@@ -54,6 +56,8 @@ enum PAGE_STATE
 #define     PAGE_referenced(flags)  (flags & PAGE_REFERENCED)
 #define     PAGE_private(flags)     (flags & PAGE_PRIVATE)
 #define     PAGE_shared(flags)      (flags & PAGE_SHARED)
+#define     PAGE_lock(flags)        (flags & PAGE_LOCK)
+#define     PAGE_unlock(flags)      (flags & PAGE_UNLOCK)
 
 static inline void page_sflags(struct page *page, unsigned long flags)
 {

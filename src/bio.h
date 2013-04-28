@@ -45,12 +45,16 @@ enum
     O_ASYNC = (1 << 1),
     O_PRIVATE = ( 1<< 2), 
     O_SHARED = ( 1 << 3), 
+    O_LOCK = (1<<4),
+    O_UNLOCK = (1<<5),
 };
 
 #define     BIO_sync(flags)    (flags & O_SYNC)
 #define     BIO_async(flags)    (flags & O_ASYNC)
 #define     BIO_private(flags)    (flags & O_PRIVATE)
 #define     BIO_shared(flags)    (flags & O_SHARED)
+#define     BIO_lock(flags)    (flags & O_LOCK)
+#define     BIO_unlock(flags)    (flags & O_UNLOCK)
 
 extern void    kmem_bio_init();
 extern bio_t*  make_bio();
