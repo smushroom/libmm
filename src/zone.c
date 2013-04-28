@@ -377,10 +377,13 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
 
         BIO_private(flags)?page_sflags(page, PAGE_PRIVATE):page_sflags(page, PAGE_SHARED);
         BIO_sync(flags)?page_sflags(page, PAGE_SYNC):page_sflags(page, PAGE_ASYNC);
+        DD("flags = 0x%lx", flags);
+        DD("page flags = 0x%lx", page->flags);
+        BIO_lock(flags)?page_sflags(page, PAGE_LOCK):page_sflags(page, PAGE_UNLOCK);
+        DD("page flags = 0x%lx", page->flags);
 
         add_active_list(pg_data,&page->lru);
 
-        DD("page flags = 0x%lx", page->flags);
 
         page->mapping = mapping;
         DD("page address = 0x%lx", page_address(page));
@@ -409,6 +412,11 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
 
     print_list_nr();
 
+    if(BIO_lock(flags))
+    {
+        mlock(page_address(origin_page), size);
+    }
+
     return page_address(origin_page);
 }
 
@@ -417,48 +425,59 @@ static int _do_free_to_swap(pte_t *pte, swp_entry_t *entry)
     if(PTE_present(pte))
     {
         struct page *page = index_to_page(pte_index(pte));
-        if(PAGE_present(page->flags))
+        /* is page is lock ? */
+        DD("page flags = 0x%lx", page->flags);
+        if(PAGE_unlock(page->flags))
+        /*if(PAGE_lock(page->flags))*/
         {
-            struct address_mapping *mapping = (struct address_mapping *)page->mapping;
-            if(mapping->a_ops->removepage)
+            if(PAGE_present(page->flags))
             {
-                DD("mapping removepage.");
-                if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                struct address_mapping *mapping = (struct address_mapping *)page->mapping;
+                if(mapping->a_ops->removepage)
                 {
-                    DD("remove page error.");
+                    DD("mapping removepage.");
+                    if(mapping->a_ops->removepage(mapping, page_to_index(page)) == NULL)
+                    {
+                        DD("remove page error.");
+                        return -3;
+                    }
+                }
+                DD("revove page index = %ld", page_to_index(page));
+
+                page->mapping = NULL;
+
+                page_cflags(page, PAGE_PRESENT);
+                page_sflags(page, PAGE_SWAPOUT);
+                page_cflags(page, PAGE_ACTIVE);
+                page_cflags(page, PAGE_REFERENCED);
+
+                DD("free to swap page flags = 0x%lx.", page->flags);
+                do_swp_writepage(page, entry);
+
+                DD("free to swap page->index = %ld.", page_to_index(page))
+                    del_active_list(pg_data, &page->lru);
+
+                make_pte(swp_offset(entry),0, swp_type(entry),pte);
+                DD("free to swap pte = 0x%lx.", pte->val);
+
+                /* free page */
+                if(free_pages(page, 0) != 0)
+                {
+                    DD("free_pages error.");
                     return -3;
                 }
             }
-            DD("revove page index = %ld", page_to_index(page));
-
-            page->mapping = NULL;
-
-            page_cflags(page, PAGE_PRESENT);
-            page_sflags(page, PAGE_SWAPOUT);
-            page_cflags(page, PAGE_ACTIVE);
-            page_cflags(page, PAGE_REFERENCED);
-
-            DD("free to swap page flags = 0x%lx.", page->flags);
-            do_swp_writepage(page, entry);
-
-            DD("free to swap page->index = %ld.", page_to_index(page))
-            del_active_list(pg_data, &page->lru);
-
-            make_pte(swp_offset(entry),0, swp_type(entry),pte);
-            DD("free to swap pte = 0x%lx.", pte->val);
-
-            /* free page */
-            if(free_pages(page, 0) != 0)
-            {
-                DD("free_pages error.");
-                return -3;
-            }
+        }
+        else
+        {
+            DD("page is locked.");
+            return -4;
         }
     }
     else
     {
         DD("page is not in memory");
-        return -4;
+        return -5;
     }
 
     return 0;
@@ -649,7 +668,7 @@ static unsigned long do_writepage_slow(struct vzone *zone, pte_t *pte, unsigned 
 
     if((ret = do_swp_readpage(entry, page)) != 0)
     {
-        DD("do_swp_writepage error. ret = %d.",ret);
+        DD("do_swp_readpage error. ret = %d.",ret);
         return 0;
     }
 
@@ -1332,15 +1351,19 @@ static int swap_page_list(struct pgdata *pgdata)
             {
                 DD("*****************************");
                 DD("active list nr = %ld", pgdata->nr_active);
-                del_shrink_list(pgdata, pos);
+
                 pte = get_pte(&zone->pgd, page->pgd_index);
+
                 DD("shrink pte = 0x%lx", pte->val);
                 DD("active list nr = %ld", pgdata->nr_active);
 
                 swp_entry_t entry;
-                _do_free_to_swap((void *)pte, &entry);
-                /* fixed the bug */
-                ++(pgdata->nr_active);
+                if(_do_free_to_swap((void *)pte, &entry) == 0)
+                {
+                    /* fixed the bug */
+                    ++(pgdata->nr_active);
+                    del_shrink_list(pgdata, pos);
+                }
                 DD("******************");
                 DD("active list nr = %ld", pgdata->nr_active);
             }
@@ -1348,11 +1371,13 @@ static int swap_page_list(struct pgdata *pgdata)
             /* shared page */
             else if(PAGE_shared(page->flags))
             {
-                del_shrink_list(pgdata, pos);
                 pte = get_pte(&zone->pgd, page->pgd_index);
 
                 swp_entry_t entry;
-                _do_free_to_swap((void *)pte, &entry);
+                if(_do_free_to_swap((void *)pte, &entry) == 0)
+                {
+                    del_shrink_list(pgdata, pos);
+                }
 
                 head2 = &page->zone_list;
                 list_for_each_safe(pos2, n2, head2)
