@@ -17,6 +17,8 @@ typedef struct
     unsigned long end;
 
     free_area_t free_area[NR_MEM_LISTS];
+    unsigned int nr_free_pages;
+
 }buddy_list_t;
 
 extern buddy_list_t buddy_list;
@@ -30,5 +32,6 @@ extern int free_list_add_line(struct page *page, const uint32_t prio, const uint
 
 extern inline addr_t buddy_start();
 extern inline addr_t buddy_end();
+extern inline unsigned int get_free_pages_nr();
 
 #endif

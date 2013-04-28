@@ -18,6 +18,11 @@ inline addr_t buddy_end()
     return buddy_list.end;
 }
 
+inline unsigned int get_free_pages_nr()
+{
+    return buddy_list.nr_free_pages;
+}
+
 inline void init_buddy_range(const addr_t start, const addr_t end)
 {
     buddy_list.start = start;
@@ -167,6 +172,7 @@ int buddy_list_tidy(const addr_t start_page_mem, const uint32_t fns)
 
     buddy_list.start = start_page_mem;
     buddy_list.end = start_page_mem + fns * PAGE_SIZE;
+    buddy_list.nr_free_pages = fns;
 
     for(i = 0;i < NR_MEM_LISTS - 1; i++)
     {

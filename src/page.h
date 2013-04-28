@@ -2,6 +2,7 @@
 #define     _PAGE_H_
 
 #include <stdio.h>
+#include <math.h>
 #include "list.h"
 #include "types.h"
 
@@ -75,7 +76,7 @@ enum PAGE_MIGRATE
     MIGRATE_TYPES
 };
 
-extern int init_buddy();
+extern int init_buddy(unsigned long *start_mem, unsigned long *reserve_mem);
 extern struct page* get_free_pages(const uint32_t prio,const uint32_t order);
 extern struct page * get_free_page(const uint32_t prio);
 extern int free_pages(struct page *page, const uint32_t order);
@@ -92,7 +93,21 @@ extern inline unsigned long get_reserve_mem();
 
 static inline uint32_t size_to_order(const size_t size)
 {
-    return (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    double d = log(2);
+    double f = log((size>>PAGE_SHIFT));
+
+    double e = f/d;
+    int order = (int)e;
+
+    if(e > order)
+    {
+        return (order + 1);
+    }
+
+    else
+    {
+        return order;
+    }
 }
 
 #define     free_page(page)     free_pages((page), 0)

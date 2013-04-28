@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <math.h>
 #include "debug.h"
 #include "zone.h"
 #include "mapping.h"
@@ -43,15 +44,29 @@ static int pgdata_init(struct pgdata *pgdata)
         return -3;
     }
 
-    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) != 0)
+    if((pthread_mutex_init(&pgdata->swap_lock, NULL)) != 0)
     {
-        DD("pthread_cond_init shrink_lock error : %s.", strerror(errno));
+        DD("pthread_mutex_init swap_lock error : %s.", strerror(errno));
+        return -3;
+    }
+
+    if((pthread_cond_init(&pgdata->swap_cond, NULL)) != 0)
+    {
+        DD("pthread_cond_init swap_cond  error : %s.", strerror(errno));
         return -4;
     }
+
+    if((pthread_cond_init(&pgdata->shrink_cond, NULL)) != 0)
+    {
+        DD("pthread_cond_init shrink_cond error : %s.", strerror(errno));
+        return -4;
+    }
+
 
     pgdata->is_urgency = 0;
     pgdata->shrink_ratio = PGDATA_SHRINK_RATIO;
     pgdata->nr_pages = DEFAULT_PAGE_FNS;
+    pgdata->nr_reserve_pages = RESERVE_PAGE_FNS;
     pgdata->nr_active = 0;
     pgdata->nr_inactive = 0;
     pgdata->nr_shrink = 0;
@@ -145,9 +160,10 @@ int vzone_alloc(const unsigned int id)
 
 void print_list_nr()
 {
-    DD("v_writepage active page = %ld.", pg_data->nr_active);
-    DD("v_writepage inactive page = %ld.", pg_data->nr_inactive);
-    DD("v_writepage shrink page = %ld.", pg_data->nr_shrink);
+    DD("active page = %ld.", pg_data->nr_active);
+    DD("inactive page = %ld.", pg_data->nr_inactive);
+    DD("shrink page = %ld.", pg_data->nr_shrink);
+    DD("free page nr = %d.", get_free_pages_nr());
 }
 
 /* add a page to active list */
@@ -328,6 +344,8 @@ unsigned long v_alloc_page(struct vzone *zone, const uint32_t prio, const size_t
         return 0;
     }
 
+    print_list_nr();
+
     struct page *origin_page = get_free_pages(prio, size_to_order(size));
 
     int i = 0, ret;
@@ -428,6 +446,13 @@ static int _do_free_to_swap(pte_t *pte, swp_entry_t *entry)
 
             make_pte(swp_offset(entry),0, swp_type(entry),pte);
             DD("free to swap pte = 0x%lx.", pte->val);
+
+            /* free page */
+            if(free_pages(page, 0) != 0)
+            {
+                DD("free_pages error.");
+                return -3;
+            }
         }
     }
     else
@@ -1122,9 +1147,9 @@ static int shrink_active_list(struct pgdata *pgdata)
     return 0;
 }
 
-static inline unsigned int get_inactive_ratio(struct pgdata *pgdata)
+static inline unsigned int get_free_ratio(struct pgdata *pgdata)
 {
-    return ((pg_data->nr_inactive * 1000) / pg_data->nr_pages);
+    return ((get_free_pages_nr() * 100) / pg_data->nr_pages);
 }
 
 /* shrink list */
@@ -1154,13 +1179,8 @@ int shrink_page_list(struct pgdata *pgdata)
         PAGE_free(page->flags);
         DD("----------------------");
         DD("send signal to kswap.");
-        pthread_cond_signal(&pgdata->shrink_cond);
+        pthread_cond_signal(&pgdata->swap_cond);
         DD("----------------------");
-
-        if(get_inactive_ratio(pg_data) < pg_data->shrink_ratio)
-        {
-            return 0;
-        }
     }
 
     /* second  reclaim page*/
@@ -1236,7 +1256,12 @@ int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
     struct address_mapping *mapping = zone->mapping;
 
     pthread_mutex_lock(&pg_data->mutex_lock);
-    void **results = (void **)get_reserve_mem(); 
+    if((mapping->nr_pages * sizeof(void *)) > (pg_data->nr_reserve_pages << PAGE_SHIFT))
+    {
+        DD("no enough reserve memory used!");
+        return -2;
+    }
+    void **results = (void **)pg_data->reserve_mem;; 
 
     if(mapping->a_ops->lookup_pages)
     {
@@ -1348,6 +1373,29 @@ static int swap_page_list(struct pgdata *pgdata)
     return 0;
 }
 
+void * idle_thread_fn(void *args)
+{
+    while(1)
+    {
+        /* check global option */
+        /*check_options();*/
+
+        DD("free page_nr = %d.", get_free_pages_nr());
+        DD("all page = %d.", pg_data->nr_pages);
+        DD("free ratio = %d.", get_free_ratio(pg_data));
+
+        if(get_free_ratio(pg_data) < pg_data->shrink_ratio)
+        {
+            DD("----------------------");
+            DD("send signal to kreclaim");
+            DD("----------------------");
+            pthread_cond_signal(&pg_data->shrink_cond);
+        }
+
+        sleep(3);
+    }
+}
+
 /* kswap page thread */
 void * kswp_thread_fn(void *args)
 {
@@ -1357,21 +1405,15 @@ void * kswp_thread_fn(void *args)
 
     while(1)
     {
-        /*pthread_mutex_lock(&pg_data->shrink_lock);*/
-        DD("=================================================");
+        pthread_mutex_lock(&pg_data->swap_lock);
+        pthread_cond_wait(&pg_data->swap_cond, &pg_data->swap_lock);
+        pthread_mutex_unlock(&pg_data->swap_lock);
+
+        DD("==============================");
         DD("nr_inactive = %ld.", pg_data->nr_inactive);
         DD("nr_active = %ld.", pg_data->nr_active);
         DD("nr_shrink = %ld.", pg_data->nr_shrink);
         DD("nr_pages = %ld.", pg_data->nr_pages);
-
-        DD("(pg_data->nr_inactive * 1000) / pg_data->nr_pages = %ld", (pg_data->nr_inactive * 1000) / pg_data->nr_pages);
-        if(get_inactive_ratio(pg_data) < pg_data->shrink_ratio)
-        {
-            pthread_cond_wait(&pg_data->shrink_cond, &pg_data->shrink_lock);
-        }
-        pthread_mutex_unlock(&pg_data->shrink_lock);
-
-        DD("==============================");
         DD("wake up by kreclaim.");
         DD("==============================");
         head = &pg_data->zonelist;
@@ -1407,7 +1449,14 @@ void *kreclaim_thread_fn(void *args)
 
     while(1)
     {
+        pthread_mutex_lock(&pg_data->shrink_lock);
+        pthread_cond_wait(&pg_data->shrink_cond, &pg_data->shrink_lock);
+        pthread_mutex_unlock(&pg_data->shrink_lock);
+
         DD("+++++++++++++++++++++++++++++++++++++++");
+        DD("wake up by idle thread.");
+        DD("+++++++++++++++++++++++++++++++++++++++");
+
         if(shrink_inactive_list(pg_data) < 1)
         {
             if(shrink_active_list(pg_data) < 1)
@@ -1431,7 +1480,10 @@ void *kreclaim_thread_fn(void *args)
 int init_mm()
 {
     /* buddy */
-    init_buddy();
+    unsigned long buddy_start_mem;
+    unsigned long buddy_reserve_mem;
+    init_buddy(&buddy_start_mem, &buddy_reserve_mem);
+
 
     /* slab */
     kmem_cache_init();
@@ -1440,6 +1492,10 @@ int init_mm()
     swp_on();
 
     pg_data = pgdata_alloc();
+    pg_data->start_mem = buddy_start_mem;
+    pg_data->reserve_mem = buddy_reserve_mem;
+
+    print_list_nr();
 
     /* thread */
     lthread_init();
