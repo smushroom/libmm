@@ -30,10 +30,18 @@ extern struct vzone * get_vzone(const unsigned int id);
 
 typedef struct pgdata
 {
-    pthread_mutex_t mutex_lock;
+    /* buddy info */
+    unsigned long nr_pages;
+    unsigned long start_mem;
+    unsigned long reserve_mem;
+    unsigned long nr_reserve_pages;
+    //unsigned long reserve_room;
 
     struct list_head zonelist;
-    unsigned long nr_pages;
+
+    pthread_mutex_t mutex_lock;
+
+    /* reclaim  info */
 
     /* active page */
     struct list_head active_list;
@@ -44,6 +52,8 @@ typedef struct pgdata
 
     pthread_mutex_t shrink_lock;
     pthread_cond_t shrink_cond;
+    pthread_mutex_t swap_lock;
+    pthread_cond_t swap_cond;
 
     struct list_head shrink_list;
     unsigned long  nr_shrink;
@@ -53,11 +63,10 @@ typedef struct pgdata
     /* is pfra urgency ? */
     uint8_t is_urgency;
 
-    unsigned long reserve_room;
 }pgdata_t;
 
 #define     PGDATA_SHRINK_NR           32
-#define     PGDATA_SHRINK_RATIO        2
+#define     PGDATA_SHRINK_RATIO        99
 #define     PGDATA_URGENCY_RATIO       1
 #define     PGDATA_URGENCY(pgdata)    (pgdata->is_urgency == 1)
 
@@ -70,6 +79,7 @@ extern int v_free_swap(swp_entry_t entry);
 
 extern void * kswp_thread_fn(void *args);
 extern void *kreclaim_thread_fn(void *args);
+extern void * idle_thread_fn(void *args);
 
 extern int init_mm();
 
