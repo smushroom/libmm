@@ -1406,7 +1406,7 @@ void * idle_thread_fn(void *args)
         /*check_options();*/
 
         DD("free page_nr = %d.", get_free_pages_nr());
-        DD("all page = %d.", pg_data->nr_pages);
+        DD("all page = %ld.", pg_data->nr_pages);
         DD("free ratio = %d.", get_free_ratio(pg_data));
 
         if(get_free_ratio(pg_data) < pg_data->shrink_ratio)
