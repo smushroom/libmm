@@ -15,7 +15,8 @@
 #include "uio.h"
 #include "pfra.h"
 
-static struct pgdata *pg_data = NULL;
+/*static struct pgdata *pg_data = NULL;*/
+struct pgdata *pg_data = NULL;
 
 /* init pgdata */
 static int pgdata_init(struct pgdata *pgdata)
@@ -1509,18 +1510,17 @@ int init_mm()
     unsigned long buddy_reserve_mem;
     init_buddy(&buddy_start_mem, &buddy_reserve_mem);
 
-
     /* slab */
     kmem_cache_init();
-
-    /* swap on */
-    swp_on();
 
     pg_data = pgdata_alloc();
     pg_data->start_mem = buddy_start_mem;
     pg_data->reserve_mem = buddy_reserve_mem;
 
     print_list_nr();
+
+    /* swap on */
+    swp_on();
 
     /* thread */
     lthread_init();

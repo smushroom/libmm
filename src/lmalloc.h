@@ -1,8 +1,9 @@
 #ifndef     _LMALLOC_H_
 #define     _LMALLOC_H_
 
-#define     __brk    sbrk
-#define     __mmap   mmap
+#include <stdio.h>
+
+#define     _LMALLOC_
 
 #define     M_MMAP_THRESHOLD    (128*1024)
 

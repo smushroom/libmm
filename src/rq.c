@@ -9,7 +9,7 @@
 
 static kmem_cache_t *req_cachep = NULL;
 
-static void kmem_request_init()
+void kmem_request_init()
 {
     req_cachep = kmem_cache_create("request_cachep",sizeof(struct request), 0 );
 }
@@ -24,7 +24,7 @@ void init_rq(struct request_queue *rq, const unsigned int type)
     memset((void *)rq, 0, sizeof(*rq));
     INIT_LIST_HEAD(&rq->queue_head);
     rq->swp_type = type;
-    kmem_request_init();
+    /*kmem_request_init();*/
 }
 
 struct request *request_alloc()
