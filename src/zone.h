@@ -83,4 +83,6 @@ extern void * idle_thread_fn(void *args);
 
 extern int init_mm();
 
+extern struct pgdata *pg_data ;
+
 #endif
