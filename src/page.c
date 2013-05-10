@@ -255,6 +255,7 @@ int init_buddy(unsigned long *start_mem, unsigned long *reserve_mem)
     page_ptr = (addr_t*)malloc(DEFAULT_PAGE_FNS * sizeof(struct page));
     /*start_page_mem = (addr_t)malloc((DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);*/
     start_page_mem = (addr_t)memalign(PAGE_SIZE, (DEFAULT_PAGE_FNS + RESERVE_PAGE_FNS) << PAGE_SHIFT);
+
     *start_mem = start_page_mem;
 
     p = (struct page *)page_ptr;

@@ -15,7 +15,8 @@
 #include "uio.h"
 #include "pfra.h"
 
-static struct pgdata *pg_data = NULL;
+/*static struct pgdata *pg_data = NULL;*/
+struct pgdata *pg_data = NULL;
 
 /* init pgdata */
 static int pgdata_init(struct pgdata *pgdata)
@@ -1406,7 +1407,7 @@ void * idle_thread_fn(void *args)
         /*check_options();*/
 
         DD("free page_nr = %d.", get_free_pages_nr());
-        DD("all page = %d.", pg_data->nr_pages);
+        DD("all page = %ld.", pg_data->nr_pages);
         DD("free ratio = %d.", get_free_ratio(pg_data));
 
         if(get_free_ratio(pg_data) < pg_data->shrink_ratio)
@@ -1509,18 +1510,17 @@ int init_mm()
     unsigned long buddy_reserve_mem;
     init_buddy(&buddy_start_mem, &buddy_reserve_mem);
 
-
     /* slab */
     kmem_cache_init();
-
-    /* swap on */
-    swp_on();
 
     pg_data = pgdata_alloc();
     pg_data->start_mem = buddy_start_mem;
     pg_data->reserve_mem = buddy_reserve_mem;
 
     print_list_nr();
+
+    /* swap on */
+    swp_on();
 
     /* thread */
     lthread_init();

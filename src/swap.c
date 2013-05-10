@@ -186,12 +186,18 @@ int swp_on()
 
     for(i = 0;i < MAX_SWPFILES; ++i)
     {
+        if(i == 5)
+        {
+            DD("i = %d", i);
+        }
         swp_info = swp_infos + i;
         swp_info->prio = i;
         swp_info->type = i;
         swp_info_init(swp_info);
         swp_info->next = i + 1;
     }
+
+    kmem_request_init();
 
     kmem_bio_init();
 

@@ -40,6 +40,7 @@ enum
 };
 
 extern void init_rq(struct request_queue *rq, const unsigned int type);
+extern void kmem_request_init();
 extern int merge_request(struct request_queue *rq, struct bio *bio);
 extern struct request * rq_get_fn(struct request_queue *rq);
 
