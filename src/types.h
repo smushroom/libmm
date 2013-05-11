@@ -10,4 +10,6 @@ typedef     uint32_t    addr_t;
 typedef     uint64_t    addr_t;
 #endif
 
+typedef     uint8_t     chk_size_t;
+
 #endif
