@@ -15,8 +15,9 @@ TEST_RTPLUS:=rtest
 TEST_WTPLUS:=wtest
 TEST_THREAD:=test_thread
 TEST_SERVER:=test_server
+TEST_MALLOC:=test_malloc
 
-all:$(TEST_PAGE) $(TEST_SLAB) $(TEST_RTPLUS) $(TEST_WTPLUS) $(TEST_THREAD) $(TEST_SERVER)
+all:$(TEST_PAGE) $(TEST_SLAB) $(TEST_RTPLUS) $(TEST_WTPLUS) $(TEST_THREAD) $(TEST_SERVER) $(TEST_MALLOC)
 
 %.o:%.c
 	$(CC) -c $(CFLAGS) $< $(INCLUDE)
@@ -39,8 +40,11 @@ $(TEST_THREAD):test_thread.o
 $(TEST_SERVER):test_server.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+$(TEST_MALLOC):test_malloc.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -f $(TEST_SLAB) $(TEST_PAGE) $(TEST_RTPLUS) $(TEST_WTPLUS) $(TEST_THREAD) $(TEST_SERVER)
+	rm -f $(TEST_SLAB) $(TEST_PAGE) $(TEST_RTPLUS) $(TEST_WTPLUS) $(TEST_THREAD) $(TEST_SERVER) $(TEST_MALLOC)
 	rm -f *.o 
 	rm -f *.idx
 

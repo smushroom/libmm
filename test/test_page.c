@@ -49,16 +49,16 @@ int main(int argc, char **argv)
 
         printf("2 free_----------------------------------------------\n");
 
-        if(lfree((void *)address) < 0)
-        {
-        printf("lfree page error.\n");
-        }
-
-        /*if(lfree_toswp((void *)address) < 0)*/
+        /*if(lfree((void *)address) < 0)*/
         /*{*/
-            /*printf("free page to swap error.\n");*/
+        /*printf("lfree page error.\n");*/
         /*}*/
-        /*printf("lfreeswp address = 0x%x.\n", address);*/
+
+        if(lfree_toswp((void *)address) < 0)
+        {
+            printf("free page to swap error.\n");
+        }
+        printf("lfreeswp address = 0x%x.\n", address);
 
         /*[>printf("4 ----------------------------------------------\n");<]*/
         /*[>if(llookup((void *)address) < 0)<]*/

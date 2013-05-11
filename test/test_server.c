@@ -6,7 +6,7 @@
 #include "buddy.h"
 #include "swap.h"
 
-#define     PAGE_NR     1
+#define     PAGE_NR     2
 
 int main(int argc, char **argv)
 {
@@ -17,18 +17,30 @@ int main(int argc, char **argv)
         return -1;
     }
 
+
+    printf("0 ----------------------------------------------\n");
     void * address;
+    address = lzalloc(PAGE_NR * 4096);
+    printf("address = 0x%x.\n", (unsigned long)address);
 
-    while(1)
+    int ret;
+    printf("5 write ----------------------------------------------\n");
+    char buf[PAGE_NR * 4096] = "wo shi softirq. ni shi shui?";
+    if((ret = lwrite((void **)&address, buf, 0, 8192))  < 8192)
     {
-        printf("0 ----------------------------------------------\n");
-        address = lzalloc(PAGE_NR * 4096);
-        printf("address = 0x%x.\n", (unsigned long)address);
-
-        sleep(100);
+        printf("lwrite error.ret = %d.\n", ret);
+    }
+    else
+    {
+        printf("lwrite page 0x%lx.\n", address);
     }
 
+    printf("1 vzone free ----------------------------------------------\n");
+    if(vzone_free(pthread_self()) < 0)
+    {
+        printf("vzone_freeerror. ");
+        return -2;
+    }
 
-    /*print_buddy_list();*/
     return 0;
 }

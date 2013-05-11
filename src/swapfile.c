@@ -87,7 +87,7 @@ static int generic_writepage(swp_info_t *swp_info, const swp_entry_t *entry, str
     {
         DD("swap file is not opend! type = %d.", type);
         char filename[32] = {0};
-        snprintf(filename, sizeof(filename), "/data/swapfile_%d.swp", type);
+        snprintf(filename, sizeof(filename), "./swapfile_%d.swp", type);
         if((fp = fopen(filename, "w+")) == NULL)
         {
             DD("fopen error : %s.", strerror(errno));
