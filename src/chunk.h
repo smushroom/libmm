@@ -14,6 +14,12 @@
 #define     IDX_SMALL   0x2
 #define     BRK_MININUM     (28*1024)
 
+typedef struct mmap_chunk
+{
+    uint32_t size;
+    struct list_head  list;
+}mmap_chunk_t, *mmap_chunk_ptr;
+
 typedef struct chunk
 {
     chk_size_t size;    /* size in bytes, includeing overhead */
@@ -60,5 +66,6 @@ typedef struct malloc_zone
 extern int init_malloc_zone();
 extern void* get_chunk(size_t size);
 extern int free_chunk(void *address);
+extern int wrapper_merge_unsort_bin();
 
 #endif
