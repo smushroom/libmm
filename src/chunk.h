@@ -35,11 +35,21 @@ typedef struct chunk
 #define     NSMALLBINS     ((LARGE_CHUNK_SIZE - SMALL_CHUNK_SIZE)/ SMALL_CHUNK_STEP) 
 #define     NLARGEBINS      9 
 
+#ifndef     UNSORT_BIN
+#define     UNSORT_BIN
+#endif
+
 typedef struct malloc_zone
 {
     uint32_t flags;
+
+#ifdef UNSORT_BIN 
+    struct list_head unsort_bin;
+#endif
+
     struct list_head smlbins[NSMALLBINS];
     struct list_head lgebins[NLARGEBINS];
+    struct list_head mmap_bin;
 
     struct malloc_zone *next;
 }malloc_zone_t;
