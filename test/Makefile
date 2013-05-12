@@ -4,7 +4,7 @@ AR:=ar
 LD:=ld
 MAKE:=make
 
-CFLAGS=-g -fno-builtin -Wall -ggdb 
+CFLAGS=-g -fno-builtin -Wall -ggdb  -O0
 
 INCLUDE=-I ../src
 LDFLAGS= -L ../src -lmm -lm -lpthread
