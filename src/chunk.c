@@ -16,9 +16,16 @@ static void print_smlbins(struct malloc_zone *mzone);
 static void print_lgebins(struct malloc_zone *mzone);
 static void print_unsortbin(struct malloc_zone *mzone);
 static void print_mmapbin(struct malloc_zone *mzone);
+static inline uint8_t size_to_idx(const size_t size);
 
 static void _init_malloc_zone(struct malloc_zone *mzone)
 {
+    if(mzone == NULL)
+    {
+        DD("init malloc zone error.");
+        return;
+    }
+
     int i = 0;
 
     mzone->flags = 0;
@@ -27,7 +34,10 @@ static void _init_malloc_zone(struct malloc_zone *mzone)
 #ifdef  UNSORT_BIN
     INIT_LIST_HEAD(&mzone->unsort_bin);
 #endif
+
+#ifdef  MMAP_BIN
     INIT_LIST_HEAD(&mzone->mmap_bin);
+#endif
 
     for(i = 0;i < NSMALLBINS; ++i)
     {
@@ -45,6 +55,118 @@ int init_malloc_zone()
     _init_malloc_zone(&malloc_state);
 
     return 0;
+}
+
+static inline void set_chunk_size(chunk_ptr chk_ptr, size_t size)
+{
+    if(chk_ptr == NULL)
+    {
+        DD("chunk is NULL");
+        return;
+    }
+
+    int index = size_to_idx(size);
+    DD("size = %ld index = %d", size, index);
+
+    if(size >= MMAP_SIZE)
+    {
+        chk_ptr->big_size = size>>MMAP_SIZE_SHIFT;
+        /*DD("big_size = 0x%x", chk_ptr->big_size);*/
+        chk_ptr->size = (size & MMAP_MASK) | MMAP_CHUNK;
+        /*DD("small size = 0x%x", chk_ptr->size);*/
+        DD("mmap chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, MMAP_CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));
+    }
+    else if(size < LARGE_CHUNK_SIZE)
+    {
+        /*chk_ptr->size = small_size(index) >> SMALL_CHUNK_SHIFT | SMALL_CHUNK;*/
+        chk_ptr->size = small_size(index) | SMALL_CHUNK;
+        /*chk_ptr->flags = SMALL_CHUNK; */
+        /*DD("small chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));*/
+    }
+    else if(size >= LARGE_CHUNK_SIZE)
+    {
+        DD("large size = 0x%x", large_size(index));
+        /*chk_ptr->size = large_size(index) >> SMALL_CHUNK_SHIFT | LARGE_CHUNK;*/
+        chk_ptr->size = large_size(index) | LARGE_CHUNK;
+        /*chk_ptr->flags = LARGE_CHUNK; */
+        DD("large chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));
+    }
+}
+
+/* get the size of chunk */
+static inline uint32_t chunk_size(void *address)
+{
+    chunk_ptr chk_ptr = (chunk_ptr)address; 
+    chk_size_t flags = chunk_flags(chk_ptr);
+    chk_size_t sml_size = chk_ptr->size;
+
+    if((flags & SMALL_CHUNK) || (flags & LARGE_CHUNK))
+    {
+        /*return (sml_size<<SMALL_CHUNK_SHIFT);*/
+        /*DD("sml_size = 0x%x, mask = %x", sml_size, ~CHUNK_FLAGS_MASK);*/
+        return (sml_size & (~CHUNK_FLAGS_MASK));
+    }
+    /*if(flags & MMAP_CHUNK)*/
+    else if(flags & MMAP_CHUNK)
+    {
+        chk_size_t big_chk_size = chk_ptr->big_size;
+        DD("mmap big size = 0x%x. smal size = 0x%x flags = 0x%x", chk_ptr->big_size, chk_ptr->size & ~CHUNK_FLAGS_MASK, chunk_flags(chk_ptr));
+        DD("mmap size = %d", MMAP_CHUNK_SIZE(chk_ptr));
+        return MMAP_CHUNK_SIZE(chk_ptr);
+    }
+}
+
+static inline void * chunk2mem(chunk_ptr chk_ptr)
+{
+    if(chk_ptr == NULL)
+    {
+        DD("chunk is NULL");
+        return NULL;
+    }
+
+    chk_size_t flags = chunk_flags(chk_ptr);
+    if((flags & SMALL_CHUNK) || (flags & LARGE_CHUNK))
+    {
+        return ((void *)chk_ptr + sizeof(chk_size_t));
+    }
+    /*if(flags & MMAP_CHUNK)*/
+    else
+    {
+        return ((void *)chk_ptr + 2 * sizeof(chk_size_t));
+    }
+}
+
+static inline chunk_ptr mem2mmap_chunk(void *address)
+{
+    if(address == NULL)
+    {
+        DD("chunk is NULL");
+        return NULL;
+    }
+
+    DD("111111111111111");
+    return ((void *)address- 2 * sizeof(chk_size_t));
+}
+
+static inline chunk_ptr mem2chunk(void *address)
+{
+    if(address == NULL)
+    {
+        DD("chunk is NULL");
+        return NULL;
+    }
+
+    chk_size_t * tmp_size = (chk_size_t *)(address - sizeof(chk_size_t));
+    DD("tmp_size = 0x%x", *tmp_size);
+    /*DD("small chunk flags = 0x%x", *tmp_size & SMALL_CHUNK);*/
+    /*DD("large chunk flags = 0x%x", *tmp_size & LARGE_CHUNK);*/
+    /*if((flags & SMALL_CHUNK) || (flags & LARGE_CHUNK))*/
+    if(((*tmp_size) & SMALL_CHUNK) || ((*tmp_size) & LARGE_CHUNK))
+    {
+        DD("222222222222222");
+        return ((void *)address- sizeof(chk_size_t));
+    }
+    /*if(flags & MMAP_CHUNK)*/
 }
 
 /* get large bins index */
@@ -121,7 +243,6 @@ static inline int is_lge_adjaddress(const void *address, const struct list_head 
     {
         return 1;
     }
-
 }
 
 /* insert chunk into large bins */
@@ -154,7 +275,7 @@ static int insert_sml_chunk_line(struct malloc_zone *mzone, void *address, uint8
 
     chunk_ptr chk = (chunk_ptr)address;
     /*chk->size = LARGE_CHUNK_SIZE<<idx;*/
-    DD("chunk size = %d", chk->size);
+    DD("chunk size = 0x%x", CHUNK_SIZE(chk));
 
     struct list_head *head, *n, *pos;
     head = &mzone->smlbins[idx];
@@ -175,8 +296,8 @@ static int insert_sml_chunk_line(struct malloc_zone *mzone, void *address, uint8
             DD("ret = %d. idx = %d.", ret, idx);
             /*if(ret == 0)*/
             /*{*/
-                /*DD("is adj address.");*/
-                /*break;*/
+            /*DD("is adj address.");*/
+            /*break;*/
             /*}*/
             if(ret == -1)
             {
@@ -191,7 +312,6 @@ static int insert_sml_chunk_line(struct malloc_zone *mzone, void *address, uint8
             DD("big");
             __list_add(&chk->list, pos, n);
         }
-
         /*list_add(&chk->list, head);*/
     }
 
@@ -203,8 +323,9 @@ static int insert_lge_chunk_line(struct malloc_zone *mzone, void *address, uint8
     chunk_ptr tmp_chk = NULL;
 
     chunk_ptr chk = (chunk_ptr)address;
-    chk->size = LARGE_CHUNK_SIZE<<idx;
-    DD("chunk size = %d", chk->size);
+    size_t size = LARGE_CHUNK_SIZE<<idx;
+    DD("chunk size = %ld",size);
+    set_chunk_size(chk, size);
 
     struct list_head *head, *n, *pos;
     head = &mzone->lgebins[idx];
@@ -253,33 +374,47 @@ static int insert_lge_chunk_line(struct malloc_zone *mzone, void *address, uint8
 #ifdef  UNSORT_BIN
 static int merge_unsort_bin(struct malloc_zone *mzone)
 {
+    int index = 0;
     struct list_head *head, *pos, *n, *tmp;
     head = &mzone->unsort_bin;
     chunk_ptr prev_chk = NULL, next_chk = NULL;
+    chk_size_t tmp_size = 0;
 
     pos = head->next;
     n = pos->next;
     while(pos != head && n != head)
-    /*list_for_each_safe(pos, n, head)*/
+        /*list_for_each_safe(pos, n, head)*/
     {
         prev_chk = list_entry(pos, struct chunk, list);
         next_chk = list_entry(n, struct chunk, list);
-        DD("unsort bin prev address = 0x%lx size = %d next address = 0x%lx size = %d", (unsigned long)prev_chk, prev_chk->size, (unsigned long)next_chk, next_chk->size);
+        DD("unsort bin prev address = 0x%lx size = %d next address = 0x%lx size = %d", (unsigned long)prev_chk, CHUNK_SIZE(prev_chk), (unsigned long)next_chk, CHUNK_SIZE(next_chk));
 
-        if((unsigned long)prev_chk + prev_chk->size == (unsigned long)next_chk)
+        if((chunk_flags(prev_chk) & LARGE_CHUNK) && (chunk_flags(next_chk) & LARGE_CHUNK))
         {
-            prev_chk->size += next_chk->size;
-            tmp = n->next;
-            /*list_del(&next_chk->list);*/
-            list_del(n);
-            n = tmp;
-            DD("unsort bin is adj.");
+            DD("---------------------------------");
+            tmp_size = CHUNK_SIZE(prev_chk); 
+            if((unsigned long)prev_chk + tmp_size == (unsigned long)next_chk)
+            {
+                /*prev_chk->size += next_chk->size;*/
+                tmp_size += CHUNK_SIZE(next_chk);
+                index = size_to_idx(tmp_size);
+                /* size is equal the large bins*/
+                if(tmp_size == large_size(index))
+                {
+                    DD("merge size = %d", tmp_size);
+                    set_chunk_size(prev_chk, tmp_size);
+                    tmp = n->next;
+                    /*list_del(&next_chk->list);*/
+                    list_del(n);
+                    n = tmp;
+                    DD("unsort bin is adj.");
+                    continue;
+                }
+            }
         }
-        else
-        {
-            pos = n;
-            n = n ->next;
-        }
+
+        pos = n;
+        n = n ->next;
     }
     return 0;
 }
@@ -388,10 +523,9 @@ static void * lmmap(struct malloc_zone *mzone, size_t size, int prot, int flags)
     }
 
     DD("mmap size = %ld.", size);
-    mmap_chunk_ptr mmap_chk_ptr = (mmap_chunk_ptr)address;
-    mmap_chk_ptr->size = size;
-    DD("mmap address = 0x%lx. size = %d.",(unsigned long)address, mmap_chk_ptr->size );
-    list_add(&mmap_chk_ptr->list, &mzone->mmap_bin);
+    /*chunk_ptr chk_ptr = (chunk_ptr)address;*/
+    /*chk_ptr->size = size;*/
+    /*DD("mmap address = 0x%lx. size = 0x%lx.",(unsigned long)address, chk_ptr->size );*/
 
     return address;
 }
@@ -408,6 +542,36 @@ static inline uint8_t size_to_idx(const size_t size)
         return lge_idx_big(size);
     }
 }
+
+#ifdef MMAP_BIN
+/* get from mmap chunk */
+static void * get_mmap_chunk(struct malloc_zone *mzone, size_t size)
+{
+    struct list_head *head, *pos, *n;
+    head = &mzone->mmap_bin;
+    chunk_ptr chk_ptr = NULL; 
+
+    list_for_each_safe(pos, n, head)
+    {
+        chk_ptr = list_entry(pos, struct chunk, list);
+        if(chk_ptr->size == size)
+        {
+            list_del(pos);
+            return chk_ptr;
+        }
+        else if(chk_ptr->size < size)
+        {
+            continue;
+        }
+        else 
+        {
+            return NULL;
+        }
+    }
+
+    return NULL;
+}
+#endif
 
 /* get from unsort first */
 static void * get_unsort_chunk(struct malloc_zone *mzone, size_t size)
@@ -455,7 +619,7 @@ static void * _get_small_chunk(struct malloc_zone *mzone, uint8_t index)
             }
 
             chk_ptr = list_entry(item, struct chunk, list);
-            DD("get chunk from index = %d. size = %d", index, chk_ptr->size);
+            DD("get chunk from index = %d. size = %d", index, small_size(index));
             break;
             /*return chk_ptr;*/
         }
@@ -463,13 +627,17 @@ static void * _get_small_chunk(struct malloc_zone *mzone, uint8_t index)
     }
     if(chk_ptr)
     {
-        chk_ptr->size = small_size(index);
+        /*chk_ptr->size = small_size(index);*/
+        DD("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        DD("_get_small_chunk chk_ptr size = %d.", small_size(index));
+        set_chunk_size(chk_ptr, small_size(index));
         int count = small_size(i) - small_size(index);
         if(count > SMALL_CHUNK_SIZE)
         {
             int tmp_index = size_to_idx(count);
-            chunk_ptr tmp_chk_ptr = (void *)chk_ptr + chk_ptr->size;
-            tmp_chk_ptr->size = small_size(tmp_index); 
+            chunk_ptr tmp_chk_ptr = (void *)chk_ptr + small_size(index);
+            /*tmp_chk_ptr->size = small_size(tmp_index); */
+            set_chunk_size(tmp_chk_ptr, small_size(tmp_index));
             insert_sml_chunk_line(mzone, tmp_chk_ptr, tmp_index);
         }
     }
@@ -499,7 +667,9 @@ static void * get_small_chunk(struct malloc_zone *mzone, const size_t size)
         return NULL;
     }
 
-    chk_ptr->size = small_size(index);
+    /*chk_ptr->size = small_size(index);*/
+    DD("set chunk size = %d.", small_size(index));
+    set_chunk_size(chk_ptr, small_size(index));
 
     int count = LARGE_CHUNK_SIZE - small_size(index);
     DD("split from large bins : count = %d.", count);
@@ -511,11 +681,12 @@ static void * get_small_chunk(struct malloc_zone *mzone, const size_t size)
     {
         int tmp_index = size_to_idx(count);
         chunk_ptr tmp_chk_ptr = (void *)chk_ptr + size;
-        tmp_chk_ptr->size = small_size(tmp_index); 
+        set_chunk_size(tmp_chk_ptr, count);
+        /*tmp_chk_ptr->size = small_size(tmp_index); */
         insert_sml_chunk_line(mzone, tmp_chk_ptr, tmp_index);
     }
 
-    DD("get from small chunk 0x%lx", (unsigned long)chk_ptr);
+    DD("get from small chunk 0x%lx size = %d", (unsigned long)chk_ptr, CHUNK_SIZE(chk_ptr));
     return chk_ptr;
 }
 
@@ -543,11 +714,13 @@ static int sep_from_large_chunk(struct malloc_zone *mzone, uint32_t index)
             DD("sep from tmp_size = %d.", tmp_size);
 
             chk_ptr = list_entry(item, struct chunk, list);
-            chk_ptr->size = tmp_size;
+            /*chk_ptr->size = tmp_size;*/
+            set_chunk_size(chk_ptr, tmp_size);
             list_add(&chk_ptr->list, head);
 
             chk_ptr = (void *)chk_ptr + tmp_size;
-            chk_ptr->size = tmp_size;
+            /*chk_ptr->size = tmp_size;*/
+            set_chunk_size(chk_ptr, tmp_size);
             list_add(&chk_ptr->list, head);
 
             return index;
@@ -609,28 +782,17 @@ repeat_large:
 void* get_chunk(const size_t size)
 {
     struct malloc_zone *mzone = &malloc_state;
+    void *addr = NULL;
 
     if(size < SMALL_CHUNK_SIZE)
     {
         DD("chunk size is too small.");
         return NULL;
     }
-    else if(size >= M_MMAP_THRESHOLD)
-    {
-        int prot = PROT_READ | PROT_WRITE;
-        /*The use of MAP_ANONYMOUS in conjunction with MAP_SHARED is only supported on Linux since kernel 2.4.*/
-        int flags = MAP_ANONYMOUS | MAP_SHARED;
-
-        void *addr = lmmap(mzone, size, prot, flags);
-        print_mmapbin(mzone);
-
-        return addr;
-    }
     else 
     {
         struct list_head *head = NULL;
         uint32_t index = 0;
-        void *addr = NULL;
         DD("get_chunk index = %d.", index);
 
         /* get chunk from unsort bin first */
@@ -671,11 +833,62 @@ repeat_get:
     }
 }
 
+void* get_mmap(size_t size)
+{
+    struct malloc_zone *mzone = &malloc_state;
+    void *addr = NULL;
+
+    if(size >= M_MMAP_THRESHOLD)
+    {
+
+#ifdef  MMAP_BIN
+
+        addr = get_mmap_chunk(mzone, size);
+
+#endif
+        if(addr == NULL)
+        {
+            int prot = PROT_READ | PROT_WRITE;
+            /*The use of MAP_ANONYMOUS in conjunction with MAP_SHARED is only supported on Linux since kernel 2.4.*/
+            int flags = MAP_ANONYMOUS | MAP_SHARED;
+
+            addr = lmmap(mzone, size, prot, flags);
+            chunk_ptr chk_ptr = (chunk_ptr)addr;
+            /*chk_ptr->size = size;*/
+            set_chunk_size(chk_ptr, size);
+        }
+
+        return chunk2mem(addr);
+    }
+
+    return NULL;
+}
+
+/* freem mmap chunk */
+static int free_mmap_chunk(struct malloc_zone *mzone, chunk_ptr chk_ptr)
+{
+    size_t size = chunk_size(chk_ptr);
+    DD("free mmap chk_ptr = 0x%lx size = %ld", (unsigned long)chk_ptr, size);
+
+#ifdef MMAP_BIN
+
+    list_add(&chk_ptr->list, &mzone->mmap_bin);
+    print_mmapbin(mzone);
+    return 0;
+
+#else
+
+    return munmap((void *)chk_ptr, size);
+
+#endif
+
+}
+
 /* free small chunk */
 static int _free_small_chunk(struct malloc_zone *mzone, chunk_ptr chk_ptr)
 {
     int idx = 0;
-    idx = size_to_idx(chk_ptr->size);
+    idx = size_to_idx(CHUNK_SIZE(chk_ptr));
 
     insert_sml_chunk_line(mzone, (void *)chk_ptr,idx);
 
@@ -686,7 +899,7 @@ static int _free_small_chunk(struct malloc_zone *mzone, chunk_ptr chk_ptr)
 static int _free_large_chunk(struct malloc_zone *mzone, chunk_ptr chk_ptr)
 {
     int idx = 0;
-    idx = size_to_idx(chk_ptr->size);
+    idx = size_to_idx(CHUNK_SIZE(chk_ptr));
 
     insert_lge_chunk_line(mzone, (void *)chk_ptr,idx);
 
@@ -701,6 +914,7 @@ static int free_to_unsortbin(struct malloc_zone *mzone, void *address)
     chunk_ptr chk_ptr = mem2chunk(address);;
     chunk_ptr tmp_chk_ptr = NULL;
 
+    DD("free size = %d.", CHUNK_SIZE(chk_ptr));
     list_for_each_safe(pos, n, head)
     {
         tmp_chk_ptr = list_entry(pos, struct chunk, list);
@@ -743,6 +957,10 @@ static int _free_chunk(struct malloc_zone *mzone, chunk_ptr chk_ptr)
 int free_chunk(void *address)
 {
     struct malloc_zone *mzone = &malloc_state;
+    chunk_ptr chk_ptr = mem2chunk(address);
+
+    size_t size = CHUNK_SIZE(chk_ptr);
+    DD("free size = 0x%lx", size);
 
 #ifdef  UNSORT_BIN
 
@@ -764,6 +982,21 @@ int free_chunk(void *address)
 #endif
 
     return 0;
+}
+
+int free_mmap(void *address)
+{
+    struct malloc_zone *mzone = &malloc_state;
+    chunk_ptr chk_ptr = mem2mmap_chunk(address);
+
+    size_t size = chunk_size(chk_ptr);
+
+    DD("size = %ld", size);
+    if(size >= M_MMAP_THRESHOLD)
+    {
+        DD("000000000000000000");
+        free_mmap_chunk(mzone, chk_ptr);
+    }
 }
 
 /* print all lgebins */
@@ -789,7 +1022,7 @@ static void print_lgebins(struct malloc_zone *mzone)
             list_for_each_safe(pos, n, head)
             {
                 chk_ptr = list_entry(pos, struct chunk, list);
-                DD("large bins chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, chk_ptr->size);
+                DD("large bins chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, CHUNK_SIZE(chk_ptr));
 
             }
         }
@@ -819,7 +1052,7 @@ static void print_smlbins(struct malloc_zone *mzone)
             list_for_each_safe(pos, n, head)
             {
                 chk_ptr = list_entry(pos, struct chunk, list);
-                DD("small bins chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, chk_ptr->size);
+                DD("small bins chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, CHUNK_SIZE(chk_ptr));
 
             }
         }
@@ -838,22 +1071,24 @@ static void print_unsortbin(struct malloc_zone *mzone)
     list_for_each_safe(pos, n, head)
     {
         chk_ptr = list_entry(pos, struct chunk, list);
-        DD("unsort bin chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, chk_ptr->size);
+        DD("unsort bin chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, CHUNK_SIZE(chk_ptr));
     }
 }
 #endif
 
+#ifdef  MMAP_BIN
 /* print mmap bin */
 static void print_mmapbin(struct malloc_zone *mzone)
 {
     struct list_head *head, *pos, *n;
     head = &mzone->mmap_bin;
-    mmap_chunk_ptr mmap_chk_ptr = NULL;
+    chunk_ptr chk_ptr = NULL;
 
     DD("***********************************************");
     list_for_each_safe(pos, n, head)
     {
-        mmap_chk_ptr = list_entry(pos, struct mmap_chunk, list);
-        DD("mmap bin chunk address = 0x%lx size = %d", (unsigned long)mmap_chk_ptr, mmap_chk_ptr->size);
+        chk_ptr = list_entry(pos, struct chunk, list);
+        DD("mmap bin chunk address = 0x%lx size = %d", (unsigned long)chk_ptr, chunk_size(chk_ptr));
     }
 }
+#endif
