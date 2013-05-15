@@ -81,7 +81,7 @@ typedef struct malloc_zone
     struct malloc_zone *next;
 }malloc_zone_t;
 
-#define     sml_idx(size)     ((size - SMALL_CHUNK_SIZE)/SMALL_CHUNK_STEP)
+//#define     sml_idx(size)     ((size - SMALL_CHUNK_SIZE)/SMALL_CHUNK_STEP)
 #define     small_size(index)   (SMALL_CHUNK_SIZE + SMALL_CHUNK_STEP * index)
 #define     large_size(index)   (LARGE_CHUNK_SIZE<<index)
 extern int init_malloc_zone();

@@ -11,7 +11,6 @@ static struct malloc_zone  malloc_state;
 
 static void * get_large_chunk(struct malloc_zone *mzone, const size_t size);
 static int merge_lge_chunk(struct malloc_zone *mzone, void *address, struct list_head *pos, uint8_t idx);
-/*static int merge_sml_chunk(struct malloc_zone *mzone, void *address, struct list_head *pos, uint8_t idx);*/
 static void print_smlbins(struct malloc_zone *mzone);
 static void print_lgebins(struct malloc_zone *mzone);
 static void print_unsortbin(struct malloc_zone *mzone);
@@ -66,7 +65,7 @@ static inline void set_chunk_size(chunk_ptr chk_ptr, size_t size)
     }
 
     int index = size_to_idx(size);
-    DD("size = %ld index = %d", size, index);
+    /*DD("size = %ld index = %d", size, index);*/
 
     if(size >= MMAP_SIZE)
     {
@@ -74,7 +73,7 @@ static inline void set_chunk_size(chunk_ptr chk_ptr, size_t size)
         /*DD("big_size = 0x%x", chk_ptr->big_size);*/
         chk_ptr->size = (size & MMAP_MASK) | MMAP_CHUNK;
         /*DD("small size = 0x%x", chk_ptr->size);*/
-        DD("mmap chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, MMAP_CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));
+        /*DD("mmap chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, MMAP_CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));*/
     }
     else if(size < LARGE_CHUNK_SIZE)
     {
@@ -85,11 +84,11 @@ static inline void set_chunk_size(chunk_ptr chk_ptr, size_t size)
     }
     else if(size >= LARGE_CHUNK_SIZE)
     {
-        DD("large size = 0x%x", large_size(index));
+        /*DD("large size = 0x%x", large_size(index));*/
         /*chk_ptr->size = large_size(index) >> SMALL_CHUNK_SHIFT | LARGE_CHUNK;*/
         chk_ptr->size = large_size(index) | LARGE_CHUNK;
         /*chk_ptr->flags = LARGE_CHUNK; */
-        DD("large chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));
+        /*DD("large chunk = 0x%x. size = 0x%x flags = 0x%x", chk_ptr->big_size, CHUNK_SIZE(chk_ptr), chunk_flags(chk_ptr));*/
     }
 }
 
@@ -167,6 +166,17 @@ static inline chunk_ptr mem2chunk(void *address)
         return ((void *)address- sizeof(chk_size_t));
     }
     /*if(flags & MMAP_CHUNK)*/
+}
+
+static inline uint8_t sml_idx(const size_t size)
+{
+    uint8_t idx = ((size - SMALL_CHUNK_SIZE)/SMALL_CHUNK_STEP);
+    if(size == (SMALL_CHUNK_SIZE + SMALL_CHUNK_STEP * idx))
+    {
+        return idx;
+    }
+
+    return (idx + 1);
 }
 
 /* get large bins index */
@@ -372,9 +382,9 @@ static int insert_lge_chunk_line(struct malloc_zone *mzone, void *address, uint8
 }
 
 #ifdef  UNSORT_BIN
-static int merge_unsort_bin(struct malloc_zone *mzone)
+static int _merge_unsort_bin(struct malloc_zone *mzone)
 {
-    int index = 0;
+    int index = 0, count = 0;
     struct list_head *head, *pos, *n, *tmp;
     head = &mzone->unsort_bin;
     chunk_ptr prev_chk = NULL, next_chk = NULL;
@@ -391,10 +401,11 @@ static int merge_unsort_bin(struct malloc_zone *mzone)
 
         if((chunk_flags(prev_chk) & LARGE_CHUNK) && (chunk_flags(next_chk) & LARGE_CHUNK))
         {
-            DD("---------------------------------");
+            /*DD("---------------------------------");*/
             tmp_size = CHUNK_SIZE(prev_chk); 
             if((unsigned long)prev_chk + tmp_size == (unsigned long)next_chk)
             {
+                /*  */
                 /*prev_chk->size += next_chk->size;*/
                 tmp_size += CHUNK_SIZE(next_chk);
                 index = size_to_idx(tmp_size);
@@ -408,6 +419,7 @@ static int merge_unsort_bin(struct malloc_zone *mzone)
                     list_del(n);
                     n = tmp;
                     DD("unsort bin is adj.");
+                    ++count;
                     continue;
                 }
             }
@@ -416,14 +428,25 @@ static int merge_unsort_bin(struct malloc_zone *mzone)
         pos = n;
         n = n ->next;
     }
-    return 0;
+
+    return count;
+}
+
+int merge_unsort_bin(struct malloc_zone *mzone)
+{
+    int count = 0;
+    do
+    {
+        count = _merge_unsort_bin(mzone);
+        print_unsortbin(mzone);
+    }while(count);
 }
 
 int wrapper_merge_unsort_bin()
 {
     merge_unsort_bin(&malloc_state);
-    print_unsortbin(&malloc_state);
 }
+
 #endif
 
 /* merge chunk */
@@ -652,6 +675,7 @@ static void * get_small_chunk(struct malloc_zone *mzone, const size_t size)
     int index = size_to_idx(size);
     chunk_ptr chk_ptr = NULL;
 
+    DD("get_small_chunk size = %ld. index = %d", size, index);
 
     if((chk_ptr = _get_small_chunk(mzone, index)))
     {
@@ -779,11 +803,12 @@ repeat_large:
 }
 
 /* get a chunk from bins ,maybe needto split and merge */
-void* get_chunk(const size_t size)
+void* _get_chunk(const size_t size)
 {
     struct malloc_zone *mzone = &malloc_state;
     void *addr = NULL;
 
+    DD("_get_chunk size = %ld", size);
     if(size < SMALL_CHUNK_SIZE)
     {
         DD("chunk size is too small.");
@@ -831,6 +856,11 @@ repeat_get:
             return chunk2mem(addr);
         }
     }
+}
+
+void * get_chunk(size_t size)
+{
+    return _get_chunk(size + sizeof(chk_size_t));
 }
 
 void* get_mmap(size_t size)
