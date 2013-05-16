@@ -455,8 +455,8 @@ static int _do_free_to_swap(pte_t *pte, swp_entry_t *entry)
                 DD("free to swap page flags = 0x%lx.", page->flags);
                 do_swp_writepage(page, entry);
 
-                DD("free to swap page->index = %ld.", page_to_index(page))
-                    del_active_list(pg_data, &page->lru);
+                DD("free to swap page->index = %ld.", page_to_index(page));
+                del_active_list(pg_data, &page->lru);
 
                 make_pte(swp_offset(entry),0, swp_type(entry),pte);
                 DD("free to swap pte = 0x%lx.", pte->val);
