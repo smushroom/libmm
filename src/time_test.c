@@ -5,7 +5,7 @@
 
 /*const float CPU_MHZ = 3000.164; //use cat /proc/cpuinfo get the value*/
 #define     CPU_MHZ     (3000.164)
-const double CPU_TICK_COUNT_PER_SECOND = (CPU_MHZ*1000*1000);
+static const double CPU_TICK_COUNT_PER_SECOND = (CPU_MHZ*1000*1000);
 static const uint64_t CPU_TICK_COUNT_PER_MILLI_SECOND = (CPU_MHZ*1000);
 static const uint64_t CPU_TICK_COUNT_PER_MICRO_SECOND = (CPU_MHZ);
 static const uint64_t CPU_TICK_COUNT_PER_NANO_SECOND = (CPU_MHZ/1000);
@@ -29,7 +29,7 @@ static __inline__ unsigned long long rdtsc(void)
 
 #endif
 
-int time_test(const register int start, const register int end)
+static int time_test(const register int start, const register int end)
 {
     register double secs = (end - start)/CPU_TICK_COUNT_PER_SECOND;
     register double milli_secs = (end - start)/CPU_TICK_COUNT_PER_MILLI_SECOND;

@@ -167,6 +167,18 @@ void print_list_nr()
     DD("free page nr = %d.", get_free_pages_nr());
 }
 
+/* add lru cache to inactive list */
+static void lru_cache_add_inactive(struct pgdata *pgdata, struct pagevec *pgvec)
+{
+    return;
+}
+
+/* add lru cache to active list */
+static void lru_cache_add_active(struct pgdata *pgdata,struct pagevec *pgvec)
+{
+    return;
+}
+
 /* add a page to active list */
 static inline void add_active_list(struct pgdata *pgdata, struct list_head *item)
 {
@@ -208,6 +220,7 @@ static inline void _move_to_inactive_list(struct pgdata *pgdata, struct list_hea
 /* move page to active list */
 void move_to_active_list(struct pgdata *pgdata, struct page *page)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     if(PAGE_inactive(page->flags))
     {
         DD("111111111111111111");
@@ -222,11 +235,13 @@ void move_to_active_list(struct pgdata *pgdata, struct page *page)
         DD("3333333333333333333");
         add_active_list(pgdata, &page->lru);
     }
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 /* move page to inactive list */
 void move_to_inactive_list(struct pgdata *pgdata, struct page *page)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     if(PAGE_active(page->flags))
     {
         page_cflags(page, PAGE_ACTIVE);
@@ -240,18 +255,22 @@ void move_to_inactive_list(struct pgdata *pgdata, struct page *page)
         page_sflags(page, PAGE_INACTIVE);
         add_inactive_list(pgdata, &page->lru);
     }
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 /* move page to shrink list */
 static inline void move_to_shrink_list(struct pgdata *pgdata, struct list_head *item)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     list_del(item);
     list_add_tail(item, &pgdata->shrink_list);
     ++(pgdata->nr_shrink);
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 static inline void del_active_list(struct pgdata *pgdata, struct list_head *item)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     if(item->next == NULL && item->prev == NULL)
     {
         DD("del from active list already.");
@@ -261,10 +280,12 @@ static inline void del_active_list(struct pgdata *pgdata, struct list_head *item
         list_del(item);
         --(pgdata->nr_active);
     }
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 static inline void del_inactive_list(struct pgdata *pgdata, struct list_head *item)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     if(item->next == NULL && item->prev == NULL)
     {
         DD("del from inactive list already.");
@@ -274,13 +295,16 @@ static inline void del_inactive_list(struct pgdata *pgdata, struct list_head *it
         list_del(item);
         --(pgdata->nr_inactive);
     }
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 /* del shrink list */
 static inline void del_shrink_list(struct pgdata *pgdata, struct list_head *item)
 {
+    pthread_mutex_lock(&pg_data->shrink_lock);
     /*list_del(item);*/
     --(pgdata->nr_shrink);
+    pthread_mutex_unlock(&pg_data->shrink_lock);
 }
 
 /* get pte from memory control block */
@@ -429,7 +453,7 @@ static int _do_free_to_swap(pte_t *pte, swp_entry_t *entry)
         /* is page is lock ? */
         DD("page flags = 0x%lx", page->flags);
         if(PAGE_unlock(page->flags))
-        /*if(PAGE_lock(page->flags))*/
+            /*if(PAGE_lock(page->flags))*/
         {
             if(PAGE_present(page->flags))
             {
@@ -1319,6 +1343,15 @@ int shrink_zone(struct pgdata *pgdata, struct vzone *zone)
     }
 
     pthread_mutex_unlock(&pg_data->mutex_lock);
+}
+
+static int shrink_kmem_cache_memory()
+{
+    return 0;
+}
+/* shrink slab */
+static int shrink_slab()
+{
 }
 
 /* swap shrink page */

@@ -28,6 +28,15 @@ extern int vzone_alloc(const unsigned int id);
 extern int vzone_free(const unsigned int id);
 extern struct vzone * get_vzone(const unsigned int id);
 
+#define     PAGEVEC_SIZE    14
+/* LRU CACHE */
+typedef struct pagevec
+{
+    unsigned long nr;
+    unsigned long cold;
+    struct list_head *list[PAGEVEC_SIZE]; 
+}pagevec_t;
+
 typedef struct pgdata
 {
     /* buddy info */
