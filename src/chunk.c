@@ -109,7 +109,7 @@ static inline uint32_t chunk_size(void *address)
     else if(flags & MMAP_CHUNK)
     {
         chk_size_t big_chk_size = chk_ptr->big_size;
-        DD("mmap big size = 0x%x. smal size = 0x%x flags = 0x%x", chk_ptr->big_size, chk_ptr->size & ~CHUNK_FLAGS_MASK, chunk_flags(chk_ptr));
+        DD("mmap big size = 0x%x. small size = 0x%x flags = 0x%x", chk_ptr->big_size, chk_ptr->size & ~CHUNK_FLAGS_MASK, chunk_flags(chk_ptr));
         DD("mmap size = %d", MMAP_CHUNK_SIZE(chk_ptr));
         return MMAP_CHUNK_SIZE(chk_ptr);
     }
@@ -818,7 +818,7 @@ void* _get_chunk(const size_t size)
     {
         struct list_head *head = NULL;
         uint32_t index = 0;
-        DD("get_chunk index = %d.", index);
+        DD("_get_chunk index = %d.", index);
 
         /* get chunk from unsort bin first */
         if(addr = get_unsort_chunk(mzone, size))
@@ -835,10 +835,14 @@ repeat_get:
                 addr = get_small_chunk(mzone,size);
                 print_smlbins(mzone);
             }
-            else 
+            else if(size < MMAP_SIZE)
             {
                 addr = get_large_chunk(mzone, size);
                 print_lgebins(mzone);
+            }
+            else
+            {
+                DD("too big size for brk.");
             }
 
             if(addr == NULL)
@@ -889,6 +893,10 @@ void* get_mmap(size_t size)
         }
 
         return chunk2mem(addr);
+    }
+    else
+    {
+        DD("too small size for mmap.");
     }
 
     return NULL;
