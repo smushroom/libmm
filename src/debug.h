@@ -19,9 +19,9 @@
 
 #define NONE    "\033[0m"        /*  to flush the previous property */
 
-#define DE(fmt, args...)  fprintf(stderr, fmt "\t%s[ File :%s, %sFunc :%s, Line :%d ]\n", ##args, RED, __FILE__,BLUE, __func__,__LINE__);
-#define DD(fmt, args...)  fprintf(stdout, fmt "\t%s[ File :%s, %sFunc :%s, %s, Line :%d ]\n", ##args, RED, __FILE__, GREEN,__func__,BROWN,__LINE__);
-#define     AE(expression)      assert(expression)
+#define DE(fmt, args...)  do{fprintf(stderr, fmt "\t%s[ File :%s, %sFunc :%s, Line :%d ]\n", ##args, RED, __FILE__,BLUE, __func__,__LINE__);}while(0)
+#define DD(fmt, args...)  do{fprintf(stdout, fmt "\t%s[ File :%s, %sFunc :%s, %s, Line :%d ]\n", ##args, RED, __FILE__, GREEN,__func__,BROWN,__LINE__);}while(0)
+#define     AE(expression)      do{assert(expression);}while(0)
 #else
 #define  DE(fmt, args...)
 #define  DD(fmt, args...)
